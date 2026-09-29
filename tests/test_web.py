@@ -418,6 +418,40 @@ def test_known_add_remove_updates_suppression_immediately(client):
     assert "mallory" not in tenant.known.get("users", [])
 
 
+def test_known_snooze_add_and_remove(client):
+    """A snooze is forward-looking (since=now), so it deliberately does NOT retroactively
+    suppress the seeded finding (dated an hour ago) - that's covered at the unit level in
+    test_engine.py. This just checks the route stores/removes it correctly."""
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.post("/t/webtest/known/snooze", data={
+        "rule_id": "new_entity", "scope_type": "user", "scope_value": "Contractor.Jane",
+        "days": "14", "note": "onboarding"}, follow_redirects=False)
+    assert r.status_code == 303
+
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    conn.close()
+    snoozes = tenant.known["snoozes"]
+    assert len(snoozes) == 1
+    s = snoozes[0]
+    assert s["rule_id"] == "new_entity"
+    assert s["user"] == "contractor.jane"   # lowercased
+    assert s["note"] == "onboarding"
+    assert "id" in s and "since" in s and "until" in s
+
+    r = client.get("/t/webtest/known")
+    assert "new_entity" in r.text and "contractor.jane" in r.text
+
+    r = client.post("/t/webtest/known/unsnooze", data={"id": s["id"]}, follow_redirects=False)
+    assert r.status_code == 303
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    conn.close()
+    assert tenant.known.get("snoozes", []) == []
+
+
 def test_suppress_from_finding_marks_user_known(client):
     from auditor import config as cfg
     from auditor import db

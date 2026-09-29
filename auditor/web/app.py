@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+import uuid
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -302,18 +303,19 @@ def register_routes(app: FastAPI) -> None:
 
     @app.get("/t/{tenant_id}/known")
     def known_activity(request: Request, tenant_id: str, conn=Depends(db_conn)):
-        from ..rules.settings_schema import MUTABLE_KINDS
+        from ..rules.settings_schema import RULE_FIELDS, MUTABLE_KINDS
         tenant = cfg.get_tenant(conn, tenant_id)
         if not tenant:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
         known = tenant.known or {}
         return render(request, "known.html", {
             "tenant": tenant, "known": known, "saved": False, "mutable_kinds": MUTABLE_KINDS,
+            "rule_ids": sorted(RULE_FIELDS.keys()),
             "counts": _known_counts(conn, tenant_id, known)})
 
     @app.post("/t/{tenant_id}/known")
     async def known_activity_save(request: Request, tenant_id: str, conn=Depends(db_conn)):
-        from ..rules.settings_schema import MUTABLE_KINDS
+        from ..rules.settings_schema import RULE_FIELDS, MUTABLE_KINDS
         form = await request.form()
         tenant = cfg.get_tenant(conn, tenant_id)
         if not tenant:
@@ -326,7 +328,8 @@ def register_routes(app: FastAPI) -> None:
         _reapply_suppression(conn, tenant_id, cfg.get_tenant(conn, tenant_id))
         return render(request, "known.html", {
             "tenant": cfg.get_tenant(conn, tenant_id), "known": known, "saved": True,
-            "mutable_kinds": MUTABLE_KINDS, "counts": _known_counts(conn, tenant_id, known)})
+            "mutable_kinds": MUTABLE_KINDS, "rule_ids": sorted(RULE_FIELDS.keys()),
+            "counts": _known_counts(conn, tenant_id, known)})
 
     @app.post("/t/{tenant_id}/known/add")
     def known_add(request: Request, tenant_id: str, conn=Depends(db_conn),
@@ -351,6 +354,38 @@ def register_routes(app: FastAPI) -> None:
             return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
         known = dict(tenant.known or {})
         known[kind] = [v for v in (known.get(kind, []) or []) if v != value]
+        _save_known(conn, tenant, known)
+        return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
+
+    @app.post("/t/{tenant_id}/known/snooze")
+    def known_snooze(request: Request, tenant_id: str, conn=Depends(db_conn),
+                      rule_id: str = Form(...), scope_type: str = Form("none"),
+                      scope_value: str = Form(""), days: int = Form(7), note: str = Form("")):
+        tenant = cfg.get_tenant(conn, tenant_id)
+        if not tenant or not rule_id:
+            return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
+        now = dt.datetime.now(dt.timezone.utc)
+        entry = {"id": uuid.uuid4().hex, "rule_id": rule_id,
+                 "since": now.isoformat(), "until": (now + dt.timedelta(days=max(1, days))).isoformat(),
+                 "note": note.strip(), "created_at": now.isoformat()}
+        scope_value = scope_value.strip()
+        if scope_type == "user" and scope_value:
+            entry["user"] = scope_value.lower()
+        elif scope_type == "ip" and scope_value:
+            entry["ip"] = scope_value
+        known = dict(tenant.known or {})
+        known["snoozes"] = (known.get("snoozes", []) or []) + [entry]
+        _save_known(conn, tenant, known)
+        _reapply_suppression(conn, tenant_id, cfg.get_tenant(conn, tenant_id))
+        return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
+
+    @app.post("/t/{tenant_id}/known/unsnooze")
+    def known_unsnooze(request: Request, tenant_id: str, conn=Depends(db_conn), id: str = Form(...)):
+        tenant = cfg.get_tenant(conn, tenant_id)
+        if not tenant:
+            return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
+        known = dict(tenant.known or {})
+        known["snoozes"] = [s for s in (known.get("snoozes", []) or []) if s.get("id") != id]
         _save_known(conn, tenant, known)
         return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
 

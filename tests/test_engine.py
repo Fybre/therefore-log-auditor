@@ -34,3 +34,48 @@ def test_muting_one_kind_does_not_suppress_another():
     user_finding = _finding(rule_id="new_entity", dedupe_key="user:alice", details={"kind": "user"},
                             subject_users=["alice"], subject_ips=[])
     assert suppression_for(user_finding, tenant) is None
+
+
+def _snooze(**overrides) -> dict:
+    base = dict(rule_id="new_entity", since="2025-12-31T00:00:00+00:00",
+                until="2026-01-31T00:00:00+00:00", note="onboarding week")
+    base.update(overrides)
+    return base
+
+
+def test_snooze_scoped_to_rule_and_user_suppresses_match():
+    tenant = Tenant(id="t", base_url="https://t.thereforeonline.com",
+                    known={"snoozes": [_snooze(user="alice")]})
+    f = _finding(subject_users=["alice"], subject_ips=[])
+    assert suppression_for(f, tenant) == "snoozed: onboarding week"
+
+
+def test_snooze_does_not_suppress_a_different_user():
+    tenant = Tenant(id="t", base_url="https://t.thereforeonline.com",
+                    known={"snoozes": [_snooze(user="alice")]})
+    f = _finding(subject_users=["mallory"], subject_ips=[])
+    assert suppression_for(f, tenant) is None
+
+
+def test_snooze_does_not_suppress_a_different_rule():
+    tenant = Tenant(id="t", base_url="https://t.thereforeonline.com",
+                    known={"snoozes": [_snooze(rule_id="mass_delete", user="alice")]})
+    f = _finding(rule_id="new_entity", subject_users=["alice"], subject_ips=[])
+    assert suppression_for(f, tenant) is None
+
+
+def test_snooze_does_not_suppress_outside_its_time_range():
+    tenant = Tenant(id="t", base_url="https://t.thereforeonline.com",
+                    known={"snoozes": [_snooze(user="alice", since="2027-01-01T00:00:00+00:00",
+                                               until="2027-02-01T00:00:00+00:00")]})
+    f = _finding(subject_users=["alice"], subject_ips=[])   # dated 2026-01-01, before the snooze starts
+    assert suppression_for(f, tenant) is None
+
+
+def test_snooze_with_no_scope_suppresses_any_matching_rule():
+    """rule_id set but no user/ip means 'suppress this rule entirely for everyone, for now' -
+    e.g. a noisy rule under active tuning."""
+    tenant = Tenant(id="t", base_url="https://t.thereforeonline.com",
+                    known={"snoozes": [_snooze()]})
+    f = _finding(subject_users=["anyone"], subject_ips=[])
+    assert suppression_for(f, tenant) == "snoozed: onboarding week"

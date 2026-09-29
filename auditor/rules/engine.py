@@ -117,6 +117,20 @@ def suppression_for(f: Finding, tenant: Tenant) -> str | None:
             continue
         if ws <= f.first_ts and f.last_ts <= we:
             return f"change window: {w.get('note', '')}".strip()
+    for s in known.get("snoozes", []) or []:
+        if s.get("rule_id") and s["rule_id"] != f.rule_id:
+            continue
+        if s.get("user") and s["user"].lower() not in [u.lower() for u in (f.subject_users or [])]:
+            continue
+        if s.get("ip") and s["ip"] not in (f.subject_ips or []):
+            continue
+        try:
+            since = dt.datetime.fromisoformat(str(s["since"]))
+            until = dt.datetime.fromisoformat(str(s["until"]))
+        except (KeyError, ValueError):
+            continue
+        if since <= f.first_ts and f.last_ts <= until:
+            return f"snoozed: {s.get('note', '')}".strip(": ") or "snoozed"
     return None
 
 
