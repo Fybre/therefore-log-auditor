@@ -3,31 +3,41 @@
 {% block content %}
 <p><a class="row-link muted" href="/t/{{ tenant.id }}/findings">&larr; {{ tenant.id }} findings</a></p>
 <h1>{{ tenant.id }} &middot; known activity</h1>
-<p class="muted">Matching findings are downgraded to info, never deleted. Read-only here - edit
-  <code>config/tenants.yaml</code> and restart to change this (a managed editor is a future step).</p>
+<p class="muted">This is the auditor's allow-list of activity you've already explained, so it stops
+  showing up as new every day. A finding whose only user or IP is listed below - or whose entire
+  time span falls inside a change window - is downgraded to <code>info</code> severity instead of
+  <code>low</code>/<code>medium</code>/<code>high</code>, and is skipped from LLM triage to save
+  tokens. Nothing is ever deleted: suppressed findings still appear in the findings list (filter by
+  "info" severity) with a note explaining why they were downgraded, so you can always see what got
+  suppressed and reverse it later by removing the entry here.</p>
 
-<div class="card">
-  <h2>Known users</h2>
-  {% if known.users %}<ul>{% for u in known.users %}<li>{{ u }}</li>{% endfor %}</ul>
-  {% else %}<p class="muted">None configured.</p>{% endif %}
-</div>
+{% if saved %}<p style="color:#067647">Saved.</p>{% endif %}
 
-<div class="card">
-  <h2>Known IPs</h2>
-  {% if known.ips %}<ul>{% for ip in known.ips %}<li>{{ ip }}</li>{% endfor %}</ul>
-  {% else %}<p class="muted">None configured.</p>{% endif %}
-</div>
-
-<div class="card">
-  <h2>Change windows</h2>
-  {% if known.windows %}
-  <ul>{% for w in known.windows %}<li>{{ w.start }} to {{ w.end }}: {{ w.note }}</li>{% endfor %}</ul>
-  {% else %}<p class="muted">None configured.</p>{% endif %}
-</div>
-
-<div class="card">
-  <h2>Notes</h2>
-  {% if known.notes %}<ul>{% for n in known.notes %}<li>{{ n }}</li>{% endfor %}</ul>
-  {% else %}<p class="muted">None configured.</p>{% endif %}
-</div>
+<form class="card" method="post" action="/t/{{ tenant.id }}/known" style="display:flex;flex-direction:column;gap:16px;max-width:640px">
+  <div>
+    <label>Known users (one per line)</label><br>
+    <textarea name="users" rows="3" style="width:100%">{{ known.users | join('\n') if known.users else '' }}</textarea>
+    <p class="muted" style="margin:4px 0 0">A finding whose only subject is one of these usernames
+      (e.g. your service account logging in) is suppressed.</p>
+  </div>
+  <div>
+    <label>Known IPs (one per line)</label><br>
+    <textarea name="ips" rows="3" style="width:100%">{{ known.ips | join('\n') if known.ips else '' }}</textarea>
+    <p class="muted" style="margin:4px 0 0">Same idea, for findings tied only to a listed IP
+      address (e.g. a known office or integration server).</p>
+  </div>
+  <div>
+    <label>Change windows (one per line: <code>&lt;start&gt; to &lt;end&gt;: &lt;note&gt;</code>)</label><br>
+    <textarea name="windows" rows="4" style="width:100%" placeholder="2026-09-28T22:00:00+10:00 to 2026-09-29T01:00:00+10:00: planned maintenance">{% for w in known.windows or [] %}{{ w.start }} to {{ w.end }}: {{ w.note }}
+{% endfor %}</textarea>
+    <p class="muted" style="margin:4px 0 0">Use ISO timestamps with an offset (e.g.
+      <code>2026-09-28T22:00:00+10:00</code>). Any finding entirely inside the window - not just
+      touching it - is suppressed, whoever or whatever it involves.</p>
+  </div>
+  <div>
+    <label>Notes (one per line, informational only - shown to the LLM as context, does not suppress anything)</label><br>
+    <textarea name="notes" rows="2" style="width:100%">{{ known.notes | join('\n') if known.notes else '' }}</textarea>
+  </div>
+  <button type="submit" style="align-self:flex-start;padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+</form>
 {% endblock %}

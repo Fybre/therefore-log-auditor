@@ -5,6 +5,7 @@ local-account login model."""
 from __future__ import annotations
 
 import datetime as dt
+import re
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -172,7 +173,27 @@ def register_routes(app: FastAPI) -> None:
     @app.get("/t/{tenant_id}/known")
     def known_activity(request: Request, tenant_id: str, conn=Depends(db_conn)):
         tenant = cfg.get_tenant(conn, tenant_id)
-        return render(request, "known.html", {"tenant": tenant, "known": tenant.known or {}})
+        if not tenant:
+            return render(request, "not_found.html", {"tenant": None}, status_code=404)
+        return render(request, "known.html", {"tenant": tenant, "known": tenant.known or {}, "saved": False})
+
+    @app.post("/t/{tenant_id}/known")
+    def known_activity_save(request: Request, tenant_id: str, conn=Depends(db_conn),
+                             users: str = Form(""), ips: str = Form(""),
+                             windows: str = Form(""), notes: str = Form("")):
+        tenant = cfg.get_tenant(conn, tenant_id)
+        if not tenant:
+            return render(request, "not_found.html", {"tenant": None}, status_code=404)
+        known = {"users": _split_lines(users), "ips": _split_lines(ips),
+                "windows": _parse_windows(windows), "notes": _split_lines(notes)}
+        cfg.save_tenant(conn, id=tenant_id, base_url=tenant.base_url, username=tenant.username,
+                        password=None, tenant_name_override=tenant.tenant_name_override,
+                        log_category_no=tenant.log_category_no, log_tz=tenant.log_tz,
+                        display_tz=tenant.display_tz, schedule_cron=tenant.schedule.get("daily", "30 3 * * *"),
+                        llm_enabled=tenant.llm.get("enabled", True), llm_redact=tenant.llm.get("redact", True),
+                        digest_email_to=tenant.digest.get("email_to", []), known=known, enabled=tenant.enabled)
+        return render(request, "known.html", {"tenant": cfg.get_tenant(conn, tenant_id),
+                                              "known": known, "saved": True})
 
     # --- Admin: tenants/servers ------------------------------------------------------------
 
@@ -369,3 +390,25 @@ def register_routes(app: FastAPI) -> None:
 
 def _split_emails(raw: str) -> list[str]:
     return [e.strip() for e in raw.replace(",", "\n").splitlines() if e.strip()]
+
+
+def _split_lines(raw: str) -> list[str]:
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+_WINDOW_RE = re.compile(r"^(?P<start>.+?)\s+to\s+(?P<end>.+):\s*(?P<note>.*)$")
+
+
+def _parse_windows(raw: str) -> list[dict]:
+    """One window per line: '<start> to <end>: <note>' - same format the digest/known page
+    already display them in, so what you see is what you type back in."""
+    out = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _WINDOW_RE.match(line)
+        if m:
+            out.append({"start": m.group("start").strip(), "end": m.group("end").strip(),
+                       "note": m.group("note").strip()})
+    return out

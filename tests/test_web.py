@@ -155,6 +155,34 @@ def test_admin_run_now_triggers_pipeline(client, monkeypatch):
     assert "run complete" in r.text
 
 
+def test_known_activity_edit_persists_and_suppresses(client):
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.get("/t/webtest/known")
+    assert r.status_code == 200
+    assert "downgraded to" in r.text   # the purpose paragraph is present
+
+    r = client.post("/t/webtest/known", data={
+        "users": "alice\nbob",
+        "ips": "10.0.0.5",
+        "windows": "2026-01-01T00:00:00+00:00 to 2026-01-02T00:00:00+00:00: planned change",
+        "notes": "alice is the new admin",
+    }, follow_redirects=False)
+    assert r.status_code == 200
+    assert "Saved." in r.text
+    assert "alice" in r.text and "bob" in r.text and "10.0.0.5" in r.text
+
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    conn.close()
+    assert tenant.known["users"] == ["alice", "bob"]
+    assert tenant.known["ips"] == ["10.0.0.5"]
+    assert tenant.known["windows"] == [{"start": "2026-01-01T00:00:00+00:00",
+                                        "end": "2026-01-02T00:00:00+00:00", "note": "planned change"}]
+    assert tenant.known["notes"] == ["alice is the new admin"]
+
+
 def test_admin_create_user_and_login_as_them(client):
     r = _login(client)
     assert r.status_code == 303
