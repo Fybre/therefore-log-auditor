@@ -10,6 +10,7 @@
   --text-faint: #98a2b3;
   --ink: #14161a;
   --ink-hover: #2a2d34;
+  --ink-text: #ffffff;
   --accent: #2563eb;
   --accent-soft: #eff4ff;
   --radius: 10px;
@@ -25,7 +26,69 @@
   --info: #94a3b8;
   --info-bg: #f8fafc;
   --good: #059669;
+  --code-bg: #10131a;
+  --code-text: #cbd5e1;
+  --code-border: #1f242e;
 }
+
+/* Dark mode: follows the OS preference by default; a manual toggle (see base.html) sets
+   data-theme and overrides it either way, persisted in localStorage per browser. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { color-scheme: dark; }
+  :root:not([data-theme="light"]) {
+    --bg: #0b0d11;
+    --surface: #15181e;
+    --surface-sunken: #1a1e25;
+    --border: #262b33;
+    --border-strong: #383f4a;
+    --text: #e6e8eb;
+    --text-muted: #9199a6;
+    --text-faint: #6b7280;
+    --ink: #05060a;
+    --ink-hover: #000000;
+    --ink-text: #e6e8eb;
+    --accent: #5b9dff;
+    --accent-soft: rgba(91, 157, 255, 0.14);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35);
+    --high-bg: rgba(220, 38, 38, 0.15);
+    --medium-bg: rgba(217, 119, 6, 0.15);
+    --low-bg: rgba(71, 85, 105, 0.2);
+    --info-bg: rgba(148, 163, 184, 0.12);
+    --good: #34d399;
+    --code-bg: #0a0c10;
+    --code-text: #b8c0cc;
+    --code-border: #1c2028;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0d11;
+  --surface: #15181e;
+  --surface-sunken: #1a1e25;
+  --border: #262b33;
+  --border-strong: #383f4a;
+  --text: #e6e8eb;
+  --text-muted: #9199a6;
+  --text-faint: #6b7280;
+  --ink: #05060a;
+  --ink-hover: #000000;
+  --ink-text: #e6e8eb;
+  --accent: #5b9dff;
+  --accent-soft: rgba(91, 157, 255, 0.14);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --high-bg: rgba(220, 38, 38, 0.15);
+  --medium-bg: rgba(217, 119, 6, 0.15);
+  --low-bg: rgba(71, 85, 105, 0.2);
+  --info-bg: rgba(148, 163, 184, 0.12);
+  --good: #34d399;
+  --code-bg: #0a0c10;
+  --code-text: #b8c0cc;
+  --code-border: #1c2028;
+}
+
+body { transition: background-color .15s, color .15s; }
 
 * { box-sizing: border-box; }
 
@@ -73,6 +136,7 @@ header button {
   padding: 5px 12px; cursor: pointer; font-size: 12.5px; font-weight: 500; transition: border-color .12s, color .12s;
 }
 header button:hover { border-color: #6b7280; color: #fff; }
+#themeToggle { padding: 5px 9px; font-size: 13px; line-height: 1; }
 
 main { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
 
@@ -148,8 +212,8 @@ form.review button { padding: 7px 16px; background: var(--ink); color: #fff; bor
 form.review button:hover { background: var(--ink-hover); }
 
 pre.evidence {
-  background: #10131a; color: #cbd5e1; padding: 14px 16px; border-radius: var(--radius-sm);
-  overflow-x: auto; font-size: 12px; line-height: 1.7; border: 1px solid #1f242e;
+  background: var(--code-bg); color: var(--code-text); padding: 14px 16px; border-radius: var(--radius-sm);
+  overflow-x: auto; font-size: 12px; line-height: 1.7; border: 1px solid var(--code-border);
 }
 
 .login-box { max-width: 340px; margin: 100px auto; }
@@ -167,7 +231,7 @@ pre.evidence {
 .summary { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .sum-pill {
   display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 16px;
-  padding: 4px 12px 4px 8px; font-size: 12.5px; color: #344054; background: var(--surface); text-decoration: none;
+  padding: 4px 12px 4px 8px; font-size: 12.5px; color: var(--text); background: var(--surface); text-decoration: none;
   box-shadow: var(--shadow-sm); transition: border-color .12s, transform .1s;
 }
 .sum-pill:hover { border-color: var(--border-strong); }

@@ -9,6 +9,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Applied before first paint so there's no flash of the wrong theme.
+    (function () {
+      try {
+        var saved = localStorage.getItem("theme");
+        if (saved) document.documentElement.setAttribute("data-theme", saved);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
 <header>
@@ -22,15 +31,35 @@
     </nav>
     {% endif %}
   </div>
-  {% if user %}
   <div class="header-right">
+    <button type="button" id="themeToggle" title="Toggle dark mode" onclick="toggleTheme()">&#127765;</button>
+    {% if user %}
     <span class="user">{{ user.username }}</span>
     <form method="post" action="/logout"><button type="submit">Log out</button></form>
+    {% endif %}
   </div>
-  {% endif %}
 </header>
 <main>
   {% block content %}{% endblock %}
 </main>
+<script>
+  function currentTheme() {
+    var saved = null;
+    try { saved = localStorage.getItem("theme"); } catch (e) {}
+    if (saved) return saved;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  function paintToggle() {
+    var btn = document.getElementById("themeToggle");
+    if (btn) btn.textContent = currentTheme() === "dark" ? "☀️" : "🌙";
+  }
+  function toggleTheme() {
+    var next = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch (e) {}
+    paintToggle();
+  }
+  paintToggle();
+</script>
 </body>
 </html>
