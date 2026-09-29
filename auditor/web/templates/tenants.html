@@ -3,18 +3,27 @@
 {% block content %}
 <h1>Tenants</h1>
 <table>
-  <tr><th>Tenant</th><th>Open high</th><th>Open medium</th><th>Open low</th><th>Last finding</th><th></th></tr>
+  <tr><th>Tenant</th><th>Open high</th><th>Open medium</th><th>Open low</th><th>Last finding</th><th>Known activity</th></tr>
   {% for r in rows %}
   <tr>
-    <td>{{ r.tenant.id }}</td>
-    <td>{% if r.high %}<span class="badge high">{{ r.high }}</span>{% else %}0{% endif %}</td>
-    <td>{% if r.medium %}<span class="badge medium">{{ r.medium }}</span>{% else %}0{% endif %}</td>
-    <td>{{ r.low or 0 }}</td>
-    <td class="muted">{{ r.last_finding | local_time(r.tenant.display_tz) }}</td>
+    <td><a class="row-link" href="/t/{{ r.tenant.id }}/findings">{{ r.tenant.id }}</a></td>
     <td>
-      <a class="row-link" href="/t/{{ r.tenant.id }}/findings">Findings</a> &middot;
-      <a class="row-link" href="/t/{{ r.tenant.id }}/known">Known activity</a>
+      <a class="row-link" href="/t/{{ r.tenant.id }}/findings?min_severity=high&status=open">
+        {% if r.high %}<span class="badge high">{{ r.high }}</span>{% else %}<span class="muted">0</span>{% endif %}
+      </a>
     </td>
+    <td>
+      <a class="row-link" href="/t/{{ r.tenant.id }}/findings?min_severity=medium&status=open">
+        {% if r.medium %}<span class="badge medium">{{ r.medium }}</span>{% else %}<span class="muted">0</span>{% endif %}
+      </a>
+    </td>
+    <td>
+      <a class="row-link" href="/t/{{ r.tenant.id }}/findings?min_severity=low&status=open">
+        {% if r.low %}<span class="badge low">{{ r.low }}</span>{% else %}<span class="muted">0</span>{% endif %}
+      </a>
+    </td>
+    <td class="muted">{{ r.last_finding | local_time(r.tenant.display_tz) }}</td>
+    <td><a class="row-link muted" href="/t/{{ r.tenant.id }}/known">Known activity</a></td>
   </tr>
   {% endfor %}
 </table>
