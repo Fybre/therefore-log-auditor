@@ -5,8 +5,18 @@
 <h1>{{ "Edit " ~ t if t else "Add tenant" }}</h1>
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 {% if test_result %}
-<p style="color: {{ '#067647' if test_result.ok else '#b42318' }}">
-  {{ "Connection OK: " if test_result.ok else "Connection failed: " }}{{ test_result.message }}</p>
+<p style="color: {{ '#067647' if test_result.ok else '#b42318' }}">{{ test_result.message }}</p>
+{% endif %}
+{% if category_matches %}
+<div class="card" style="max-width:520px">
+  <table>
+    <tr><th>Category</th><th>Name</th></tr>
+    {% for c in category_matches %}
+    <tr><td>{{ c.CategoryNo }}</td><td>{{ c.Name }}</td></tr>
+    {% endfor %}
+  </table>
+  <p class="muted" style="margin:8px 0 0">Enter the right one into "Logfiles category number" below and Save.</p>
+</div>
 {% endif %}
 <form class="card" method="post" action="{{ '/admin/tenants/' ~ t ~ '/edit' if t else '/admin/tenants/new' }}"
       style="display:flex;flex-direction:column;gap:10px;max-width:520px">
@@ -38,9 +48,11 @@
   <label>Digest email recipients (one per line)</label>
   <textarea name="digest_email_to" rows="2">{{ (row.digest_email_to | join('\n')) if row else '' }}</textarea>
   <label><input type="checkbox" name="enabled" value="true" {% if not row or row.enabled %}checked{% endif %}> Enabled (scheduled to run daily)</label>
-  <div style="display:flex;gap:10px">
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
     <button type="submit" formaction="/admin/tenants/test-connection"
             style="padding:8px 18px;background:#fff;color:#101828;border:1px solid #d0d5dd;border-radius:4px;cursor:pointer">Test connection</button>
+    <button type="submit" formaction="/admin/tenants/detect-category"
+            style="padding:8px 18px;background:#fff;color:#101828;border:1px solid #d0d5dd;border-radius:4px;cursor:pointer">Detect Logfiles category</button>
     <button type="submit" style="padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
   </div>
 </form>

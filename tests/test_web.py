@@ -155,6 +155,29 @@ def test_admin_run_now_triggers_pipeline(client, monkeypatch):
     assert "run complete" in r.text
 
 
+def test_detect_category_uniquely(client, monkeypatch):
+    monkeypatch.setattr(
+        "auditor.therefore.ThereforeClient.list_categories",
+        lambda self: [{"CategoryNo": 1, "Name": "Logfiles"}, {"CategoryNo": 50, "Name": "Invoices"}])
+    _login(client)
+    r = client.post("/admin/tenants/detect-category", data={
+        "base_url": "https://x.thereforeonline.com", "username": "u", "password": "p"})
+    assert r.status_code == 200
+    assert "Detected: category 1" in r.text
+
+
+def test_detect_category_ambiguous_lists_candidates(client, monkeypatch):
+    monkeypatch.setattr(
+        "auditor.therefore.ThereforeClient.list_categories",
+        lambda self: [{"CategoryNo": 1, "Name": "Logfiles"}, {"CategoryNo": 324, "Name": "Logfiles2"}])
+    _login(client)
+    r = client.post("/admin/tenants/detect-category", data={
+        "base_url": "https://x.thereforeonline.com", "username": "u", "password": "p"})
+    assert r.status_code == 200
+    assert "pick the right one" in r.text
+    assert "Logfiles2" in r.text and ">1<" in r.text
+
+
 def test_known_activity_edit_persists_and_suppresses(client):
     from auditor import config as cfg
     from auditor import db

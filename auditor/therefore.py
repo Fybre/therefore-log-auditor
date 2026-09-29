@@ -124,6 +124,22 @@ class ThereforeClient:
         (unreachable host) on failure. Does not touch Logfiles/settings - just auth."""
         self.post("GetConnectionToken")
 
+    def list_categories(self) -> list[dict[str, Any]]:
+        """Every queryable category (ItemType==2) in the tenant, flattened, as
+        [{"CategoryNo": int, "Name": str}, ...]. Used to find the Logfiles category number,
+        which is per-tenant - CategoryNo 1 on craigdemo is not a safe assumption elsewhere."""
+        res = self.post("GetCategoriesTree")
+        out: list[dict[str, Any]] = []
+
+        def walk(items):
+            for item in items or []:
+                if item.get("ItemType") == 2:
+                    out.append({"CategoryNo": item.get("ItemNo"), "Name": item.get("Name")})
+                walk(item.get("ChildItems"))
+
+        walk(res.get("TreeItems"))
+        return out
+
 
 def _month_windows(since: dt.date, until: dt.date) -> Iterator[tuple[dt.date, dt.date]]:
     lo = since

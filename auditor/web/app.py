@@ -215,35 +215,54 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/admin/tenants/test-connection")
     async def admin_tenant_test_connection(request: Request):
-        from ..config import Tenant as TenantDC
         from ..therefore import ThereforeClient
         form = await request.form()
-
-        def get(name, default=""):
-            return form.get(name, default)
-
-        test_tenant = TenantDC(id="_test", base_url=get("base_url"), username=get("username"),
-                               password=get("password"), tenant_name_override=get("tenant_name_override") or None)
+        test_tenant = _test_tenant_from_form(form)
         try:
             ThereforeClient(test_tenant, timeout=15).test_connection()
             note = f" (TenantName header: {test_tenant.tenant_name})" if test_tenant.tenant_name else ""
             test_result = {"ok": True, "message": f"Connected successfully.{note}"}
         except Exception as exc:
             test_result = {"ok": False, "message": str(exc)}
-
-        tenant_id = get("tenant_id") or None   # set by a hidden field only when editing
-        row = {
-            "base_url": get("base_url"), "therefore_username": get("username"),
-            "password": get("password"),   # echoed back so a successful test doesn't need retyping
-            "tenant_name_override": get("tenant_name_override"),
-            "log_category_no": int(get("log_category_no") or 1), "log_tz": get("log_tz", "UTC"),
-            "display_tz": get("display_tz", "UTC"), "schedule_cron": get("schedule_cron", "30 3 * * *"),
-            "llm_enabled": bool(get("llm_enabled")), "llm_redact": bool(get("llm_redact")),
-            "digest_email_to": _split_emails(get("digest_email_to")), "enabled": bool(get("enabled")),
-        }
         return render(request, "admin_tenant_form.html", {
-            "t": tenant_id, "row": row, "error": None, "test_result": test_result,
-            "new_id": get("id")})
+            "t": form.get("tenant_id") or None, "row": _row_from_form(form), "error": None,
+            "test_result": test_result, "new_id": form.get("id")})
+
+    @app.post("/admin/tenants/detect-category")
+    async def admin_tenant_detect_category(request: Request):
+        from ..therefore import ThereforeClient
+        form = await request.form()
+        test_tenant = _test_tenant_from_form(form)
+        category_matches: list[dict] = []
+        detected: int | None = None
+        try:
+            cats = ThereforeClient(test_tenant, timeout=20).list_categories()
+            matches = [c for c in cats if "logfile" in (c["Name"] or "").lower()]
+            if len(matches) == 1:
+                detected = matches[0]["CategoryNo"]
+                test_result = {"ok": True,
+                               "message": f"Detected: category {detected} (\"{matches[0]['Name']}\")."}
+            elif matches:
+                category_matches = matches
+                test_result = {"ok": True,
+                               "message": f"Found {len(matches)} categories with \"Logfiles\" in "
+                                          "the name - pick the right one below."}
+            else:
+                category_matches = cats
+                test_result = {"ok": False,
+                               "message": f"No category named \"Logfiles\" found among "
+                                          f"{len(cats)} categories - pick one below, or check "
+                                          "this tenant's Solution Designer for the right name."}
+        except Exception as exc:
+            test_result = {"ok": False, "message": str(exc)}
+
+        row = _row_from_form(form)
+        if detected is not None:
+            row["log_category_no"] = detected
+        return render(request, "admin_tenant_form.html", {
+            "t": form.get("tenant_id") or None, "row": row, "error": None,
+            "test_result": test_result, "new_id": form.get("id"),
+            "category_matches": category_matches})
 
     @app.post("/admin/tenants/new")
     def admin_tenant_create(request: Request, conn=Depends(db_conn),
@@ -386,6 +405,30 @@ def register_routes(app: FastAPI) -> None:
                         (passwords.hash_password(password), user_id))
         conn.commit()
         return RedirectResponse(url="/admin/users", status_code=303)
+
+
+def _test_tenant_from_form(form) -> cfg.Tenant:
+    """A throwaway, unsaved Tenant built from an add/edit-tenant form submission, for
+    test-connection and detect-category (both need a real client but nothing persisted)."""
+    return cfg.Tenant(id="_test", base_url=form.get("base_url", ""), username=form.get("username", ""),
+                      password=form.get("password", ""),
+                      tenant_name_override=form.get("tenant_name_override") or None)
+
+
+def _row_from_form(form) -> dict:
+    """Reconstructs the admin_tenant_form.html 'row' dict from a submitted form, so
+    test-connection/detect-category can re-render the form with what was typed, unsaved."""
+    def get(name, default=""):
+        return form.get(name, default)
+    return {
+        "base_url": get("base_url"), "therefore_username": get("username"),
+        "password": get("password"),   # echoed back so a successful test doesn't need retyping
+        "tenant_name_override": get("tenant_name_override"),
+        "log_category_no": int(get("log_category_no") or 1), "log_tz": get("log_tz", "UTC"),
+        "display_tz": get("display_tz", "UTC"), "schedule_cron": get("schedule_cron", "30 3 * * *"),
+        "llm_enabled": bool(get("llm_enabled")), "llm_redact": bool(get("llm_redact")),
+        "digest_email_to": _split_emails(get("digest_email_to")), "enabled": bool(get("enabled")),
+    }
 
 
 def _split_emails(raw: str) -> list[str]:
