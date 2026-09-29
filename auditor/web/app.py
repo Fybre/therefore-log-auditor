@@ -575,7 +575,12 @@ def register_routes(app: FastAPI) -> None:
                 test_result = {"ok": True, "message": f"Test email sent to {test_to}."}
             except Exception as exc:
                 test_result = {"ok": False, "message": f"Could not send: {exc}"}
-        smtp_display = {"host": host, "port": port, "user": user, "from": from_addr, "starttls": starttls}
+        # Echo back whatever password was typed for this test (only here, only right after a
+        # test) - otherwise a password typed just to try it out vanishes from the form, and a
+        # Save right after the test silently keeps the OLD saved password instead of the one
+        # that was just confirmed to work.
+        smtp_display = {"host": host, "port": port, "user": user, "from": from_addr,
+                        "starttls": starttls, "password": password}
         return render(request, "admin_smtp.html", {
             "smtp": smtp_display, "saved": False, "test_result": test_result, "test_to": test_to})
 

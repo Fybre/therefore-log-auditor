@@ -191,6 +191,47 @@ def test_admin_smtp_test_email_sends_with_unsaved_form_values(client, monkeypatc
     smtp, to = calls[0]
     assert smtp["host"] == "smtp.example.com" and smtp["password"] == "hunter2"
     assert to == ["craig@example.com"]
+    # Regression: a password typed just to test it must survive the re-render, or a Save
+    # right after testing silently discards it instead of persisting what was just verified.
+    assert 'name="password" value="hunter2"' in r.text
+
+
+def test_admin_smtp_test_then_save_persists_the_tested_password(client, monkeypatch):
+    """The exact bug scenario: type a new password, test it, then Save without retyping -
+    relying on the password field having been re-filled by the test response."""
+    from auditor import config as cfg
+    from auditor import db
+    monkeypatch.setattr("auditor.digest.send_email", lambda *a, **k: None)
+    _login(client)
+    r = client.post("/admin/smtp/test", data={
+        "host": "smtp.example.com", "port": "587", "user": "bot", "password": "brandnewpw",
+        "from_addr": "bot@example.com", "starttls": "true", "test_to": "craig@example.com"})
+    assert 'value="brandnewpw"' in r.text   # what the browser would now resubmit on Save
+
+    client.post("/admin/smtp", data={"host": "smtp.example.com", "port": "587", "user": "bot",
+                "password": "brandnewpw", "from_addr": "bot@example.com", "starttls": "true"})
+    conn = db.connect(DB)
+    smtp = cfg.load_smtp(conn)
+    conn.close()
+    assert smtp["password"] == "brandnewpw"
+
+
+def test_admin_smtp_test_without_typing_password_does_not_echo_saved_one(client, monkeypatch):
+    """Testing the already-saved config (Password left blank) must not leak the real saved
+    password into the HTML - only what was actually typed gets echoed."""
+    from auditor import config as cfg
+    from auditor import db
+    conn = db.connect(DB)
+    cfg.save_smtp(conn, host="smtp.example.com", port=587, user="bot", password="supersecret",
+                  from_addr="bot@example.com", starttls=True)
+    conn.close()
+    monkeypatch.setattr("auditor.digest.send_email", lambda *a, **k: None)
+    _login(client)
+    r = client.post("/admin/smtp/test", data={
+        "host": "smtp.example.com", "port": "587", "user": "bot", "password": "",
+        "from_addr": "bot@example.com", "starttls": "true", "test_to": "craig@example.com"})
+    assert "supersecret" not in r.text
+    assert 'name="password" value=""' in r.text
 
 
 def test_admin_smtp_test_email_falls_back_to_saved_password(client, monkeypatch):
