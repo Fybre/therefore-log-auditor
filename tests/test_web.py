@@ -326,6 +326,39 @@ def test_findings_page_shows_summary_and_rollup(client):
     assert "findings on" in r.text   # the rollup summary text
 
 
+def test_decode_log_settings():
+    from auditor.web.app import _decode_log_settings
+    settings = {
+        "700": "<Server><LogMask><V>3</V><V>1</V><V>1</V><V>0</V></LogMask></Server>",
+        "701": 1, "702": 0, "703": 1020, "704": 10,
+    }
+    taken_at = dt.datetime(2026, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
+    out = _decode_log_settings(settings, taken_at, "Australia/Sydney")
+    assert out["archive_mode"] == "Every day"
+    assert out["archive_time_utc"] == "17:00 UTC"
+    assert out["split_size_mb"] == 10
+    assert out["logmask_positions"] == [3, 1, 1, 0]
+    counts = {c["value"]: c["count"] for c in out["logmask_counts"]}
+    assert counts == {3: 1, 1: 2, 0: 1}
+
+
+def test_tenant_edit_page_shows_log_settings(client):
+    from auditor import db
+    _login(client)
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("""INSERT INTO settings_snapshots (tenant_id, settings) VALUES
+                       ('webtest', %s)""",
+                    ['{"700": "<Server><LogMask><V>3</V><V>0</V></LogMask></Server>", '
+                     '"701": 1, "703": 1020, "704": 10}'])
+    conn.commit()
+    conn.close()
+    r = client.get("/admin/tenants/webtest/edit")
+    assert r.status_code == 200
+    assert "Every day" in r.text
+    assert "17:00 UTC" in r.text
+
+
 def test_admin_create_user_and_login_as_them(client):
     r = _login(client)
     assert r.status_code == 303

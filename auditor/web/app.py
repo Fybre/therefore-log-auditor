@@ -358,7 +358,13 @@ def register_routes(app: FastAPI) -> None:
         row = cfg.get_tenant_row(conn, tenant_id)
         if not row:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
-        return render(request, "admin_tenant_form.html", {"t": tenant_id, "row": row, "error": None})
+        with conn.cursor() as cur:
+            cur.execute("""SELECT settings, taken_at FROM settings_snapshots
+                           WHERE tenant_id=%s ORDER BY taken_at DESC LIMIT 1""", (tenant_id,))
+            snap = cur.fetchone()
+        log_settings = _decode_log_settings(snap["settings"], snap["taken_at"], row["display_tz"]) if snap else None
+        return render(request, "admin_tenant_form.html", {
+            "t": tenant_id, "row": row, "error": None, "log_settings": log_settings})
 
     @app.post("/admin/tenants/test-connection")
     async def admin_tenant_test_connection(request: Request):
@@ -633,6 +639,41 @@ def _split_lines(raw: str) -> list[str]:
 
 
 _WINDOW_RE = re.compile(r"^(?P<start>.+?)\s+to\s+(?P<end>.+):\s*(?P<note>.*)$")
+
+
+ARCHIVE_MODES = {1: "Every day"}   # other values are weekly/monthly/by-size, not yet mapped
+LOGMASK_LABELS = {0: "Do not log", 1: "Log failure", 2: "Log success", 3: "Log always"}
+
+
+def _decode_log_settings(settings: dict, taken_at, display_tz: str) -> dict:
+    """Turns the raw GetSettings snapshot (keys 700-704, see the Server Settings section of
+    the therefore-api skill) into something readable on the tenant page. The LogMask (700) is
+    52 positional values whose position->event mapping isn't established yet (needs toggling
+    one event at a time in Solution Designer and diffing) - so it's shown as counts + a raw
+    per-position grid rather than named events."""
+    positions = [int(v) for v in re.findall(r"<V>(\d+)</V>", str(settings.get("700") or ""))]
+    counts: dict[int, int] = {}
+    for v in positions:
+        counts[v] = counts.get(v, 0) + 1
+    archive_mode = settings.get("701")
+    archive_time_min = settings.get("703")
+    archive_time_utc = archive_time_local = None
+    if isinstance(archive_time_min, int):
+        h, m = divmod(archive_time_min, 60)
+        archive_time_utc = f"{h:02d}:{m:02d} UTC"
+        local_dt = dt.datetime.now(dt.timezone.utc).replace(hour=h % 24, minute=m, second=0, microsecond=0)
+        archive_time_local = local_dt.astimezone(ZoneInfo(display_tz)).strftime("%H:%M %Z")
+    return {
+        "taken_at": taken_at,
+        "archive_mode": ARCHIVE_MODES.get(archive_mode, f"Mode {archive_mode} (unmapped)") if archive_mode is not None else None,
+        "archive_weekday": settings.get("702"),
+        "archive_time_utc": archive_time_utc,
+        "archive_time_local": archive_time_local,
+        "split_size_mb": settings.get("704"),
+        "logmask_positions": positions,
+        "logmask_counts": [{"value": v, "label": LOGMASK_LABELS.get(v, f"Value {v}"), "count": c}
+                          for v, c in sorted(counts.items())],
+    }
 
 
 def _parse_windows(raw: str) -> list[dict]:

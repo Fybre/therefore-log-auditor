@@ -69,6 +69,48 @@
     outside {{ t }}'s cron schedule.</p>
   <button type="submit" style="padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Run {{ t }} now</button>
 </form>
+
+<div class="card" style="max-width:520px">
+  <h2 style="margin-top:0">Server logging settings</h2>
+  {% if log_settings %}
+  <p class="muted" style="margin-top:0">Read from {{ t }}'s own Solution Designer &gt; Settings &gt;
+    Server Logging, as of {{ log_settings.taken_at | local_time(row.display_tz) }}. Read-only here -
+    change it in Solution Designer, not this dashboard; the next run picks up the change.</p>
+  <table>
+    <tr><td>Archive schedule</td><td>
+      {{ log_settings.archive_mode or "unknown" }}{% if log_settings.archive_time_utc %} at
+      {{ log_settings.archive_time_utc }} ({{ log_settings.archive_time_local }}){% endif %}</td></tr>
+    {% if log_settings.archive_weekday is not none %}
+    <tr><td>Archive weekday</td><td>{{ log_settings.archive_weekday }}
+      <span class="muted">(only used in weekly mode)</span></td></tr>
+    {% endif %}
+    {% if log_settings.split_size_mb %}
+    <tr><td>Split size</td><td>{{ log_settings.split_size_mb }} MB
+      <span class="muted">(only used when archiving by file size)</span></td></tr>
+    {% endif %}
+  </table>
+  <h2 style="margin:18px 0 8px">Log mask (what gets logged)</h2>
+  {% if log_settings.logmask_counts %}
+  <p class="muted" style="margin:0 0 10px">
+    {% for c in log_settings.logmask_counts %}{{ c.count }} {{ c.label | lower }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+    &mdash; {{ log_settings.logmask_positions | length }} positions total. Individual event names
+    aren't mapped to positions yet (needs toggling one event at a time in Solution Designer and
+    diffing what changes here).</p>
+  <div style="display:flex;flex-wrap:wrap;gap:3px">
+    {% for v in log_settings.logmask_positions %}
+    <span title="position {{ loop.index0 }}: {{ {0:'do not log',1:'log failure',2:'log success',3:'log always'}.get(v, 'value ' ~ v) }}"
+          style="width:13px;height:13px;border-radius:3px;display:inline-block;background:{{ {0:'var(--border-strong)',1:'var(--medium)',2:'var(--accent)',3:'var(--good)'}.get(v, 'var(--high)') }}"></span>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">No log mask data in the latest settings snapshot.</p>
+  {% endif %}
+  {% else %}
+  <p class="muted">No settings snapshot yet &mdash; run this tenant once ("Run now" above) to read
+    its logging configuration.</p>
+  {% endif %}
+</div>
+
 <form method="post" action="/admin/tenants/{{ t }}/delete" class="card" style="max-width:520px">
   <h2 style="margin-top:0">Delete tenant</h2>
   <p class="muted">Deletes the tenant's config only. Collected logs/findings for {{ t }} stay in the
