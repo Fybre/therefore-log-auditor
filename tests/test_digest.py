@@ -1,9 +1,10 @@
-"""Pure unit tests for digest.render() - no DB needed, data is built by hand to match the
-shape gather() produces."""
+"""Pure unit tests for digest.render() and write_and_send() - no DB needed, data is built by
+hand to match the shape gather() produces."""
 import datetime as dt
+from pathlib import Path
 
-from auditor.config import Tenant
-from auditor.digest import SEV_ORDER, render
+from auditor.config import Settings, Tenant
+from auditor.digest import SEV_ORDER, render, write_and_send
 
 
 def _finding(**overrides):
@@ -55,3 +56,46 @@ def test_render_shows_currently_open_counts_separately_from_todays_changes():
     subject, md, html_body = render(tenant, data, None, {})
     assert "Currently open: 2 high, 5 medium, 1 low" in md
     assert "Currently open: 2 high, 5 medium, 1 low" in html_body
+
+
+def _settings(reports_dir: Path) -> Settings:
+    return Settings(database_url="", tenants=[], rules={}, llm_base_url="", llm_api_key="",
+                     llm_model="", smtp={"host": "smtp.example.com", "port": 587}, reports_dir=reports_dir)
+
+
+def test_write_and_send_skips_email_when_only_on_new_and_nothing_changed(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("auditor.digest.send_email", lambda *a, **k: sent.append(a))
+    tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC",
+                     digest={"email_to": ["ops@acme.test"], "only_on_new": True})
+    write_and_send(_settings(tmp_path), tenant, "subject", "md", "<html></html>", has_new_findings=False)
+    assert sent == []
+
+
+def test_write_and_send_still_writes_report_when_email_skipped(tmp_path, monkeypatch):
+    monkeypatch.setattr("auditor.digest.send_email", lambda *a, **k: None)
+    tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC",
+                     digest={"email_to": ["ops@acme.test"], "only_on_new": True})
+    path = write_and_send(_settings(tmp_path), tenant, "subject", "md", "<html></html>", has_new_findings=False)
+    assert path.exists()
+    assert (tmp_path / "acme" / path.with_suffix(".md").name).exists()
+
+
+def test_write_and_send_emails_when_only_on_new_and_something_changed(tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("auditor.digest.send_email", lambda *a, **k: sent.append(a))
+    tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC",
+                     digest={"email_to": ["ops@acme.test"], "only_on_new": True})
+    write_and_send(_settings(tmp_path), tenant, "subject", "md", "<html></html>", has_new_findings=True)
+    assert len(sent) == 1
+
+
+def test_write_and_send_emails_regardless_when_only_on_new_not_set(tmp_path, monkeypatch):
+    """Default behaviour (only_on_new unset/False) is unchanged: always email if recipients+SMTP
+    are configured, whether or not this run had new findings."""
+    sent = []
+    monkeypatch.setattr("auditor.digest.send_email", lambda *a, **k: sent.append(a))
+    tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC",
+                     digest={"email_to": ["ops@acme.test"]})
+    write_and_send(_settings(tmp_path), tenant, "subject", "md", "<html></html>", has_new_findings=False)
+    assert len(sent) == 1

@@ -133,7 +133,7 @@ def _row_to_tenant(conn: psycopg.Connection, r: dict) -> Tenant:
         log_category_no=r["log_category_no"], log_tz=r["log_tz"], display_tz=r["display_tz"],
         schedule={"daily": r["schedule_cron"]},
         llm={"enabled": r["llm_enabled"], "redact": r["llm_redact"]},
-        digest={"email_to": list(r["digest_email_to"] or [])},
+        digest={"email_to": list(r["digest_email_to"] or []), "only_on_new": r["digest_only_on_new"]},
         known=r["known"] or {},
         rules=rules,
         enabled=r["enabled"],
@@ -162,7 +162,8 @@ def get_tenant(conn: psycopg.Connection, tenant_id: str) -> Tenant | None:
 def save_tenant(conn: psycopg.Connection, *, id: str, base_url: str, username: str,
                  password: str | None, tenant_name_override: str | None, log_category_no: int,
                  log_tz: str, display_tz: str, schedule_cron: str, llm_enabled: bool,
-                 llm_redact: bool, digest_email_to: list[str], known: dict, enabled: bool) -> None:
+                 llm_redact: bool, digest_email_to: list[str], digest_only_on_new: bool,
+                 known: dict, enabled: bool) -> None:
     """Create or update a tenant. `password=None` keeps the existing encrypted password
     (used when editing a tenant without re-entering its Therefore login)."""
     with conn.cursor() as cur:
@@ -170,11 +171,12 @@ def save_tenant(conn: psycopg.Connection, *, id: str, base_url: str, username: s
             cur.execute(
                 """UPDATE tenants SET base_url=%s, therefore_username=%s, tenant_name_override=%s,
                        log_category_no=%s, log_tz=%s, display_tz=%s, schedule_cron=%s,
-                       llm_enabled=%s, llm_redact=%s, digest_email_to=%s, known=%s, enabled=%s,
-                       updated_at=now()
+                       llm_enabled=%s, llm_redact=%s, digest_email_to=%s, digest_only_on_new=%s,
+                       known=%s, enabled=%s, updated_at=now()
                    WHERE id=%s""",
                 (base_url, username, tenant_name_override, log_category_no, log_tz, display_tz,
-                 schedule_cron, llm_enabled, llm_redact, digest_email_to, Jsonb(known), enabled, id))
+                 schedule_cron, llm_enabled, llm_redact, digest_email_to, digest_only_on_new,
+                 Jsonb(known), enabled, id))
             if cur.rowcount == 0:
                 raise KeyError(f"Unknown tenant '{id}' (password required to create a new tenant)")
         else:
@@ -182,8 +184,8 @@ def save_tenant(conn: psycopg.Connection, *, id: str, base_url: str, username: s
             cur.execute(
                 """INSERT INTO tenants (id, base_url, therefore_username, therefore_password_enc,
                        tenant_name_override, log_category_no, log_tz, display_tz, schedule_cron,
-                       llm_enabled, llm_redact, digest_email_to, known, enabled)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       llm_enabled, llm_redact, digest_email_to, digest_only_on_new, known, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (id) DO UPDATE SET
                        base_url=EXCLUDED.base_url, therefore_username=EXCLUDED.therefore_username,
                        therefore_password_enc=EXCLUDED.therefore_password_enc,
@@ -191,11 +193,12 @@ def save_tenant(conn: psycopg.Connection, *, id: str, base_url: str, username: s
                        log_category_no=EXCLUDED.log_category_no, log_tz=EXCLUDED.log_tz,
                        display_tz=EXCLUDED.display_tz, schedule_cron=EXCLUDED.schedule_cron,
                        llm_enabled=EXCLUDED.llm_enabled, llm_redact=EXCLUDED.llm_redact,
-                       digest_email_to=EXCLUDED.digest_email_to, known=EXCLUDED.known,
+                       digest_email_to=EXCLUDED.digest_email_to,
+                       digest_only_on_new=EXCLUDED.digest_only_on_new, known=EXCLUDED.known,
                        enabled=EXCLUDED.enabled, updated_at=now()""",
                 (id, base_url, username, password_enc, tenant_name_override, log_category_no,
                  log_tz, display_tz, schedule_cron, llm_enabled, llm_redact, digest_email_to,
-                 Jsonb(known), enabled))
+                 digest_only_on_new, Jsonb(known), enabled))
     conn.commit()
 
 

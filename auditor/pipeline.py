@@ -61,7 +61,8 @@ def run_tenant(settings: Settings, tenant: Tenant, kind: str = "daily", since: d
             if provider:
                 stats["llm_tokens"] = provider.usage.total
             subject, md, body = digest.render(tenant, data, summary, stats, dashboard_url=settings.dashboard_url)
-            stats["report"] = str(digest.write_and_send(settings, tenant, subject, md, body))
+            stats["report"] = str(digest.write_and_send(settings, tenant, subject, md, body,
+                                                         has_new_findings=stats["findings_changed"] > 0))
     except Exception as exc:
         conn.rollback()
         stats["error"] = str(exc)

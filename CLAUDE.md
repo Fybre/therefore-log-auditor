@@ -132,6 +132,14 @@ Behaviours worth knowing:
   `known.users` instead.
 - Triage runs on findings that changed, plus any untriaged non-info findings in the window
   (max 40 per run). If the LLM fails, the finding keeps its rule severity.
+- Digest emails include an all-time "currently open" backlog summary (not just what changed this
+  run) and, when `dashboard_url` is set (`/admin/smtp`'s "Dashboard link" card), links back to the
+  dashboard - both a general link and per-finding deep links. The report file is *always* written
+  to `reports/<tenant>/` regardless. Whether it's *emailed* can additionally be gated per-tenant:
+  the "Only email the digest when there are new findings" checkbox
+  (`tenants.digest_only_on_new`, `/admin/tenants/{id}/edit`) skips the send when
+  `findings_changed == 0` for that run (migration 005). Off by default - existing tenants keep
+  emailing every run until they opt in.
 
 ## What was learned about Therefore logging (verified on craigdemo, Web API 35.0.3)
 
@@ -171,25 +179,77 @@ Behaviours worth knowing:
 1. ~~**First Docker build on the Mac.**~~ Done 29 Sep: `docker compose up -d --build` builds and
    runs cleanly (Postgres + scheduler), a live `auditor run --tenant craigdemo` worked end to end,
    and all 8 tests pass against the compose Postgres.
-2. **LogMask mapping** (a reminder was scheduled for 30 Sep 9am in the Cowork session). Poll
-   `GetSettings` key 700 every ~10s while Craig toggles one Server Logging event at a time in
-   Solution Designer, and diff to map positions to events. Then name the events in `config_drift`
-   and update the therefore-api-skill + therefore-mcp docs.
-3. **Does a logging-settings change need a server restart before it takes effect?** Craig's test
-   on 29 Sep AEST:
-   - DocNo 28016 saved with Doc New at its default (failure only)
-   - then Doc New switched to Always and DocNo 28021 saved
-   - then a restart, then DocNo 28025 saved (all in category 340 "Counter Test")
+2. **LogMask mapping** — in progress, started 30 Sep. Method: fetch `GetSettings` key 700 via the
+   `auditor` container (`docker compose exec auditor python -c "..."`, using
+   `ThereforeClient.get_settings((700,))` against the craigdemo tenant loaded from the DB - see
+   below for the exact snippet), have Craig toggle one Server Logging event at a time in Solution
+   Designer, then re-fetch and diff by index.
+   - **Confirmed 30 Sep: a settings change applies as soon as the Solution Designer dialog is
+     saved (OK clicked) - no server restart needed.** Re-fetching immediately after Save but
+     before clicking OK showed no change; re-fetching after OK showed the diff. This also answers
+     open item 3 below (no restart required) without needing to wait for a log file.
+   - Fetch snippet (run inside the `auditor` container, which already has craigdemo's DB-stored
+     credentials loaded):
+     ```python
+     from auditor.config import load_settings
+     from auditor.db import connect
+     from auditor import config as cfg
+     from auditor.therefore import ThereforeClient
 
-   Read the Server log with GENERATED 2026-09-29 (arrives about 03:15 AEST 30 Sep) and see which
-   Doc New lines appear:
-   - only 28025 → a restart is needed
-   - 28021 and 28025 → the change applies immediately
+     settings = load_settings()
+     with connect(settings.database_url) as conn:
+         cfg.refresh_from_db(settings, conn)
+     tenant = next(t for t in settings.tenants if t.id == 'craigdemo')
+     print(ThereforeClient(tenant).get_settings((700,))[700])
+     ```
+   - **Confirmed positions (0-indexed), from clean single-diff tests, each followed by a full
+     Solution Designer restart + fresh screenshot to rule out UI caching:**
+     - Position 5 = Document New
+     - Position 15 = Change
+     - Position 23 = Document Retrieve
+     - Position 25 = Delete
+     - Position 26 = Check Out
+     Values confirmed so far: `0` = Do not log, `2` = Log success, `3` = Log always (per the
+     skill). `1` = Log failure is documented but **see the anomaly below before trusting a `1`
+     result** for New/Retrieve/Change specifically.
+   - **Open anomaly, found 30 Sep, not yet root-caused:** selecting **"Log failure"** for New,
+     Retrieve, or Change in Solution Designer and clicking OK does not reliably persist as value
+     `1`. Repeated tests landed on `3` ("Log always") instead - reproduced multiple times, survived
+     a full Solution Designer restart and a tenant restart (ruling out client-side or simple
+     server-side caching). "Do not log" and "Log success" selections on the *same* rows persisted
+     correctly (confirmed values `0` and `2`). Near the end of the session a further test (setting
+     New to "Log always", an already-non-buggy value) produced an unexpected `3`→`1` transition
+     instead, which doesn't fit the pattern established by earlier tests either - so treat *all*
+     reads/writes around positions 5/15/23 from the tail end of the 30 Sep session (roughly from
+     the "Change → Log failure" test onward) as unreliable ground truth, not just the "Log
+     failure" transitions specifically. Two live hypotheses, neither confirmed:
+     1. A real Therefore-side business rule: certain core write-critical document events can't be
+        set to "failure-only" logging and silently get promoted to "Always".
+     2. A Solution Designer UI/dropdown bug specific to how the "Log failure" option (and possibly
+        subsequent saves generally, once a session has done several edits) commits for these rows.
+     **Next session:** re-verify position 5/15/23 from scratch with a fully fresh Solution
+     Designer session (not continuing from this session's dialog state), doing exactly one
+     change-save-fresh-reload-screenshot cycle per test with no back-to-back edits, and note the
+     exact wall-clock time of each OK click in case there's a delayed-write race condition rather
+     than a value-mapping bug. Worth trying a value Solution Designer hasn't shown any trouble
+     with (e.g. "Log always") as the very first action in a brand new session, to see if the
+     `3`→`1` surprise repeats even in isolation.
+   - Remaining: map the other 47 positions the same way, one event at a time (Craig's stated
+     protocol: change one event, save, confirm; then revert it, save, confirm; then move to the
+     next - and always screenshot after a full dialog close/reopen, not just after Save, since a
+     screenshot without a fresh reload turned out not to be trustworthy). Once the map is
+     complete, name the events in `config_drift` and update the therefore-api-skill +
+     therefore-mcp docs (per the skill's "Keeping Knowledge in Sync" section).
+3. ~~**Does a logging-settings change need a server restart before it takes effect?**~~ Answered
+   30 Sep via the LogMask-mapping test above: **no restart needed, applies on Save.** Craig's
+   earlier 29 Sep DocNo-based test (28016/28021/28025 in category 340) is no longer needed to
+   confirm this, though the log file for that day can still be read if the *related* puzzle below
+   is worth chasing.
 
-   Related puzzle: Craig's login at about 19:20 AEST on 28 Sep and API calls at about 19:26 were
-   *not* logged, and successful Connects only appeared from 00:02 AEST 29 Sep. Also check that
-   Craig's 08:47 AEST 29 Sep login and the settings-scan burst (about 1,500 GetSettings calls
-   from the dev environment's IP around 11:00 AEST 29 Sep) show up.
+   Related puzzle (still open, lower priority now): Craig's login at about 19:20 AEST on 28 Sep
+   and API calls at about 19:26 were *not* logged, and successful Connects only appeared from
+   00:02 AEST 29 Sep. Also check that Craig's 08:47 AEST 29 Sep login and the settings-scan burst
+   (about 1,500 GetSettings calls from the dev environment's IP around 11:00 AEST 29 Sep) show up.
 4. ~~**Incident grouping.**~~ Done 29 Sep: findings now get an `incident_key` (primary subject —
    first user, else first IP — plus calendar day in `display_tz`; see `incident_key_for` in
    `rules/engine.py`). `llm.triage()` sends all of an incident's findings in one call and applies

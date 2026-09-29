@@ -79,7 +79,9 @@ def _save_known(conn, tenant: cfg.Tenant, known: dict) -> None:
                     log_category_no=tenant.log_category_no, log_tz=tenant.log_tz,
                     display_tz=tenant.display_tz, schedule_cron=tenant.schedule.get("daily", "30 3 * * *"),
                     llm_enabled=tenant.llm.get("enabled", True), llm_redact=tenant.llm.get("redact", True),
-                    digest_email_to=tenant.digest.get("email_to", []), known=known, enabled=tenant.enabled)
+                    digest_email_to=tenant.digest.get("email_to", []),
+                    digest_only_on_new=tenant.digest.get("only_on_new", False),
+                    known=known, enabled=tenant.enabled)
 
 
 def _reapply_suppression(conn, tenant_id: str, tenant: cfg.Tenant) -> int:
@@ -436,7 +438,8 @@ def register_routes(app: FastAPI) -> None:
                              schedule_hour: int = Form(3), schedule_minute: int = Form(30),
                              use_advanced_schedule: bool = Form(False), schedule_cron_advanced: str = Form(""),
                              llm_enabled: bool = Form(False), llm_redact: bool = Form(False),
-                             digest_email_to: str = Form(""), enabled: bool = Form(False)):
+                             digest_email_to: str = Form(""), digest_only_on_new: bool = Form(False),
+                             enabled: bool = Form(False)):
         if cfg.get_tenant_row(conn, id):
             return render(request, "admin_tenant_form.html",
                           {"t": None, "row": None, "error": f"Tenant '{id}' already exists"}, status_code=400)
@@ -445,7 +448,8 @@ def register_routes(app: FastAPI) -> None:
                         tenant_name_override=tenant_name_override or None,
                         log_category_no=log_category_no, log_tz=log_tz, display_tz=display_tz,
                         schedule_cron=schedule_cron, llm_enabled=llm_enabled, llm_redact=llm_redact,
-                        digest_email_to=_split_emails(digest_email_to), known={}, enabled=enabled)
+                        digest_email_to=_split_emails(digest_email_to),
+                        digest_only_on_new=digest_only_on_new, known={}, enabled=enabled)
         return RedirectResponse(url="/admin/tenants", status_code=303)
 
     @app.post("/admin/tenants/{tenant_id}/edit")
@@ -457,7 +461,8 @@ def register_routes(app: FastAPI) -> None:
                              schedule_hour: int = Form(3), schedule_minute: int = Form(30),
                              use_advanced_schedule: bool = Form(False), schedule_cron_advanced: str = Form(""),
                              llm_enabled: bool = Form(False), llm_redact: bool = Form(False),
-                             digest_email_to: str = Form(""), enabled: bool = Form(False)):
+                             digest_email_to: str = Form(""), digest_only_on_new: bool = Form(False),
+                             enabled: bool = Form(False)):
         existing = cfg.get_tenant(conn, tenant_id)
         schedule_cron = _compute_schedule_cron(schedule_hour, schedule_minute, use_advanced_schedule, schedule_cron_advanced)
         cfg.save_tenant(conn, id=tenant_id, base_url=base_url, username=username,
@@ -465,6 +470,7 @@ def register_routes(app: FastAPI) -> None:
                         log_category_no=log_category_no, log_tz=log_tz, display_tz=display_tz,
                         schedule_cron=schedule_cron, llm_enabled=llm_enabled, llm_redact=llm_redact,
                         digest_email_to=_split_emails(digest_email_to),
+                        digest_only_on_new=digest_only_on_new,
                         known=(existing.known if existing else {}), enabled=enabled)
         return RedirectResponse(url="/admin/tenants", status_code=303)
 
@@ -669,7 +675,8 @@ def _row_from_form(form) -> dict:
         "schedule_hour": hour, "schedule_minute": minute, "schedule_advanced": advanced,
         "schedule_cron_advanced": cron_advanced,
         "llm_enabled": bool(get("llm_enabled")), "llm_redact": bool(get("llm_redact")),
-        "digest_email_to": _split_emails(get("digest_email_to")), "enabled": bool(get("enabled")),
+        "digest_email_to": _split_emails(get("digest_email_to")),
+        "digest_only_on_new": bool(get("digest_only_on_new")), "enabled": bool(get("enabled")),
     }
 
 

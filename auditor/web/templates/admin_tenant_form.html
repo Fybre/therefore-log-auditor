@@ -68,6 +68,13 @@
   <label><input type="checkbox" name="llm_redact" value="true" {% if not row or row.llm_redact %}checked{% endif %}> Redact users/IPs/hosts before sending to the LLM</label>
   <label>Digest email recipients (one per line)</label>
   <textarea name="digest_email_to" rows="2">{{ (row.digest_email_to | join('\n')) if row else '' }}</textarea>
+  <label style="font-weight:normal;display:flex;align-items:center;gap:6px">
+    <input type="checkbox" name="digest_only_on_new" value="true" {% if row and row.digest_only_on_new %}checked{% endif %}>
+    Only email the digest when there are new findings
+  </label>
+  <p class="muted" style="margin:-4px 0 0;font-size:12px">The report is still written to
+    <code>reports/{{ t or '&lt;tenant&gt;' }}/</code> every run either way - this only
+    suppresses the email on quiet days.</p>
   <label><input type="checkbox" name="enabled" value="true" {% if not row or row.enabled %}checked{% endif %}> Enabled (scheduled to run daily)</label>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
     <button type="submit" formaction="/admin/tenants/test-connection"

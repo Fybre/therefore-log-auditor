@@ -43,6 +43,7 @@ def import_legacy_config(conn: psycopg.Connection) -> dict:
                 llm_enabled=(t.get("llm") or {}).get("enabled", True),
                 llm_redact=(t.get("llm") or {}).get("redact", True),
                 digest_email_to=(t.get("digest") or {}).get("email_to", []) or [],
+                digest_only_on_new=(t.get("digest") or {}).get("only_on_new", False),
                 known=t.get("known", {}) or {}, enabled=True,
             )
             for rule_id, override in (t.get("rules") or {}).items():

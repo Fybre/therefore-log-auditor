@@ -28,8 +28,8 @@ def client(monkeypatch):
     cfg.save_tenant(conn, id="webtest", base_url="https://webtest.thereforeonline.com",
                     username="svc", password="pw", tenant_name_override=None, log_category_no=1,
                     log_tz="UTC", display_tz="UTC", schedule_cron="30 3 * * *", llm_enabled=True,
-                    llm_redact=True, digest_email_to=[], known={"users": ["svc.logaudit"]},
-                    enabled=True)
+                    llm_redact=True, digest_email_to=[], digest_only_on_new=False,
+                    known={"users": ["svc.logaudit"]}, enabled=True)
     tenant = cfg.get_tenant(conn, "webtest")
     now = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
     f = Finding(rule_id="new_entity", dedupe_key="user:mallory", title="New user: mallory",

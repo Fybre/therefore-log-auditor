@@ -171,7 +171,8 @@ def send_email(smtp: dict, to: list[str], subject: str, text: str, html: str | N
         s.send_message(msg)
 
 
-def write_and_send(settings: Settings, tenant: Tenant, subject: str, md: str, body_html: str) -> Path:
+def write_and_send(settings: Settings, tenant: Tenant, subject: str, md: str, body_html: str,
+                    has_new_findings: bool = True) -> Path:
     out_dir = settings.reports_dir / tenant.id
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now(ZoneInfo(tenant.display_tz)).strftime("%Y-%m-%d_%H%M")
@@ -180,7 +181,10 @@ def write_and_send(settings: Settings, tenant: Tenant, subject: str, md: str, bo
     path.write_text(body_html)
     to = (tenant.digest or {}).get("email_to") or []
     smtp = settings.smtp
-    if to and smtp.get("host"):
+    if (tenant.digest or {}).get("only_on_new") and not has_new_findings:
+        log.info("Digest not emailed for %s: no new findings this run and only_on_new is set "
+                 "(report still written to %s)", tenant.id, path)
+    elif to and smtp.get("host"):
         try:
             send_email(smtp, to, subject, md, body_html)
             log.info("Digest emailed to %s", to)
