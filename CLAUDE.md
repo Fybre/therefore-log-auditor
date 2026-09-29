@@ -172,10 +172,22 @@ Behaviours worth knowing:
    asserts exactly one LLM call for two grouped findings). Not yet exercised by real tenant data —
    craigdemo's current findings don't happen to co-occur for one user/IP/day — so watch the next
    live incident to confirm the grouped narrative reads well in production, not just in the test.
-5. **Service account.** Create `svc.logaudit` (read Logfiles + settings; write only to a future
-   "Audit Reports" category) and replace Craig's credentials in `.env`. Test whether a non-admin
-   account can read `GetSettings`. Several keys expose infrastructure (SQL server, storage paths,
-   SMTP, OAuth config), which may need raising with Therefore.
+5. ~~**Service account.**~~ Done 29 Sep: `svc.logaudit` created on craigdemo and `.env` switched
+   over from Craig's own login (Craig updated `.env` himself — creating a user via the API needs
+   the account's admin credentials read from disk, which Claude Code's auto-mode classifier blocks
+   as "credential materialization" even after in-chat confirmation; it can only be done by the user
+   directly, e.g. via `!`). A live `auditor run --tenant craigdemo` with the new credentials
+   succeeded end to end with no warnings, confirming `svc.logaudit` can already read the Logfiles
+   category and `GetSettings` (keys 700-704) - so a non-admin/service account **can** read
+   `GetSettings` on craigdemo, resolving the open question about Server Settings access.
+   Not yet done: writing to a future "Audit Reports" category (that category doesn't exist yet -
+   Phase 2 work) and tightening `svc.logaudit`'s permissions down from whatever it inherited by
+   default (it was never scoped to read-only; worth checking in Solution Designer what it can
+   actually do beyond Logfiles/settings). Craig also plans to move from Basic auth to JWT/Bearer
+   auth later - note per the therefore-api-skill that `GetConnectionToken`'s token is a 12-char
+   string, not a JWT, and fails as a Bearer token, so this needs checking whether Therefore Online
+   has a separate JWT/OAuth flow before implementing (settings keys 187/189 - JWT trusted issuers,
+   OAuth settings XML - suggest one exists).
 6. ~~**GitHub.**~~ Done 29 Sep: https://github.com/Fybre/therefore-log-auditor (public), `main`
    pushed and tracked as `origin/main`. Checked git history first — no real secrets were ever
    committed (`.env`/`config/tenants.yaml` were always gitignored, only placeholder values exist).
