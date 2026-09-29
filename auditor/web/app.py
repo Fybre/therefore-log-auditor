@@ -63,6 +63,38 @@ def db_conn(request: Request):
         conn.close()
 
 
+def _save_known(conn, tenant: cfg.Tenant, known: dict) -> None:
+    cfg.save_tenant(conn, id=tenant.id, base_url=tenant.base_url, username=tenant.username,
+                    password=None, tenant_name_override=tenant.tenant_name_override,
+                    log_category_no=tenant.log_category_no, log_tz=tenant.log_tz,
+                    display_tz=tenant.display_tz, schedule_cron=tenant.schedule.get("daily", "30 3 * * *"),
+                    llm_enabled=tenant.llm.get("enabled", True), llm_redact=tenant.llm.get("redact", True),
+                    digest_email_to=tenant.digest.get("email_to", []), known=known, enabled=tenant.enabled)
+
+
+def _reapply_suppression(conn, tenant_id: str, tenant: cfg.Tenant) -> int:
+    """After a known.* change, immediately downgrade any currently-open finding that now
+    matches - rather than waiting for the next scheduled run - so a quick action's effect is
+    visible right away. Returns how many findings were touched."""
+    from ..rules.engine import Finding, suppression_for
+    touched = 0
+    with conn.cursor() as cur:
+        cur.execute("""SELECT id, rule_id, subject_users, subject_ips, details, first_ts, last_ts
+                       FROM findings WHERE tenant_id=%s AND severity <> 'info'""", (tenant_id,))
+        rows = cur.fetchall()
+        for r in rows:
+            f = Finding(rule_id=r["rule_id"], dedupe_key="", title="", severity="low",
+                        first_ts=r["first_ts"], last_ts=r["last_ts"], details=r["details"] or {},
+                        subject_users=r["subject_users"] or [], subject_ips=r["subject_ips"] or [])
+            supp = suppression_for(f, tenant)
+            if supp:
+                cur.execute("UPDATE findings SET severity='info', suppressed_by=%s WHERE id=%s",
+                            (supp, r["id"]))
+                touched += 1
+    conn.commit()
+    return touched
+
+
 def register_routes(app: FastAPI) -> None:
     templates: Jinja2Templates = app.state.templates
 
@@ -109,11 +141,22 @@ def register_routes(app: FastAPI) -> None:
 
     @app.get("/t/{tenant_id}/findings")
     def findings_list(request: Request, tenant_id: str, conn=Depends(db_conn),
-                       min_severity: str = "low", status: str = "", days: int = 30):
+                       min_severity: str = "low", status: str = "", days: int = 30, rule: str = ""):
         tenant = cfg.get_tenant(conn, tenant_id)
         allowed = list(SEV_ORDER)[:list(SEV_ORDER).index(min_severity) + 1] if min_severity in SEV_ORDER else list(SEV_ORDER)
         since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         with conn.cursor() as cur:
+            # Severity breakdown ignores the severity filter itself, so switching min_severity
+            # doesn't hide the very counts that would tell you whether to switch it.
+            cur.execute("""SELECT severity, count(*) AS n FROM findings
+                           WHERE tenant_id=%s AND last_ts >= %s AND (%s = '' OR status = %s)
+                           GROUP BY 1""", (tenant_id, since, status, status))
+            severity_counts = {r["severity"]: r["n"] for r in cur.fetchall()}
+            cur.execute("""SELECT rule_id, count(*) AS n FROM findings
+                           WHERE tenant_id=%s AND severity = ANY(%s) AND last_ts >= %s
+                                 AND (%s = '' OR status = %s)
+                           GROUP BY 1 ORDER BY 2 DESC""", (tenant_id, allowed, since, status, status))
+            rule_counts = cur.fetchall()
             cur.execute(
                 """SELECT id, rule_id, title, severity, status, last_ts, llm_verdict,
                           incident_key, suppressed_by,
@@ -121,14 +164,16 @@ def register_routes(app: FastAPI) -> None:
                               AS incident_size
                    FROM findings
                    WHERE tenant_id=%s AND severity = ANY(%s) AND last_ts >= %s
-                         AND (%s = '' OR status = %s)
+                         AND (%s = '' OR status = %s) AND (%s = '' OR rule_id = %s)
                    ORDER BY array_position(ARRAY['high','medium','low','info'], severity), last_ts DESC
                    LIMIT 300""",
-                (tenant_id, allowed, since, status, status))
+                (tenant_id, allowed, since, status, status, rule, rule))
             findings = cur.fetchall()
         return render(request, "findings.html", {
-            "tenant": tenant, "findings": findings, "min_severity": min_severity,
-            "status": status, "days": days, "statuses": REVIEW_STATUSES})
+            "tenant": tenant, "items": _group_for_display(findings, tenant.display_tz),
+            "min_severity": min_severity, "status": status, "days": days, "rule": rule,
+            "statuses": REVIEW_STATUSES, "severity_counts": severity_counts, "rule_counts": rule_counts,
+            "total": sum(severity_counts.values())})
 
     @app.get("/t/{tenant_id}/findings/{finding_id}")
     def finding_detail(request: Request, tenant_id: str, finding_id: int, conn=Depends(db_conn)):
@@ -170,6 +215,41 @@ def register_routes(app: FastAPI) -> None:
         conn.commit()
         return RedirectResponse(url=f"/t/{tenant_id}/findings/{finding_id}", status_code=303)
 
+    @app.post("/t/{tenant_id}/findings/{finding_id}/suppress")
+    def suppress_from_finding(request: Request, tenant_id: str, finding_id: int, conn=Depends(db_conn),
+                               action: str = Form(...)):
+        """Quick actions right from a finding: mark its user/IP as known, or mute its whole
+        category - the same known.* mechanism as the Known Activity page, just filled in from
+        this finding instead of retyping the value there."""
+        tenant = cfg.get_tenant(conn, tenant_id)
+        if not tenant:
+            return render(request, "not_found.html", {"tenant": None}, status_code=404)
+        with conn.cursor() as cur:
+            cur.execute("SELECT subject_users, subject_ips, rule_id, details FROM findings "
+                       "WHERE tenant_id=%s AND id=%s", (tenant_id, finding_id))
+            f = cur.fetchone()
+        if not f:
+            return render(request, "not_found.html", {"tenant": tenant}, status_code=404)
+        known = dict(tenant.known or {})
+        if action == "know_user" and f["subject_users"]:
+            users = set(known.get("users", []) or [])
+            users.update(u.lower() for u in f["subject_users"])
+            known["users"] = sorted(users)
+        elif action == "know_ip" and f["subject_ips"]:
+            ips = set(known.get("ips", []) or [])
+            ips.update(f["subject_ips"])
+            known["ips"] = sorted(ips)
+        elif action == "mute_kind" and (f["details"] or {}).get("kind"):
+            key = f"{f['rule_id']}:{f['details']['kind']}"
+            muted = set(known.get("muted_kinds", []) or [])
+            muted.add(key)
+            known["muted_kinds"] = sorted(muted)
+        else:
+            return RedirectResponse(url=f"/t/{tenant_id}/findings/{finding_id}", status_code=303)
+        _save_known(conn, tenant, known)
+        _reapply_suppression(conn, tenant_id, cfg.get_tenant(conn, tenant_id))
+        return RedirectResponse(url=f"/t/{tenant_id}/findings/{finding_id}", status_code=303)
+
     @app.post("/t/{tenant_id}/findings/bulk-review")
     async def bulk_review_findings(request: Request, tenant_id: str, conn=Depends(db_conn)):
         form = await request.form()
@@ -188,14 +268,36 @@ def register_routes(app: FastAPI) -> None:
         url = f"/t/{tenant_id}/findings" + (f"?{return_qs}" if return_qs else "")
         return RedirectResponse(url=url, status_code=303)
 
+    def _known_counts(conn, tenant_id: str, known: dict) -> dict:
+        """How many current findings each known entry is responsible for suppressing - so a
+        stale entry (0 findings) is visible next to a load-bearing one (dozens)."""
+        counts: dict = {"users": {}, "ips": {}, "muted_kinds": {}}
+        with conn.cursor() as cur:
+            for u in known.get("users", []) or []:
+                cur.execute("SELECT count(*) AS n FROM findings WHERE tenant_id=%s AND %s = ANY(subject_users)",
+                            (tenant_id, u.lower()))
+                counts["users"][u] = cur.fetchone()["n"]
+            for ip in known.get("ips", []) or []:
+                cur.execute("SELECT count(*) AS n FROM findings WHERE tenant_id=%s AND %s = ANY(subject_ips)",
+                            (tenant_id, ip))
+                counts["ips"][ip] = cur.fetchone()["n"]
+            for key in known.get("muted_kinds", []) or []:
+                rule_id, _, kind = key.partition(":")
+                cur.execute("SELECT count(*) AS n FROM findings WHERE tenant_id=%s AND rule_id=%s "
+                           "AND details->>'kind'=%s", (tenant_id, rule_id, kind))
+                counts["muted_kinds"][key] = cur.fetchone()["n"]
+        return counts
+
     @app.get("/t/{tenant_id}/known")
     def known_activity(request: Request, tenant_id: str, conn=Depends(db_conn)):
         from ..rules.settings_schema import MUTABLE_KINDS
         tenant = cfg.get_tenant(conn, tenant_id)
         if not tenant:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
-        return render(request, "known.html", {"tenant": tenant, "known": tenant.known or {},
-                                              "saved": False, "mutable_kinds": MUTABLE_KINDS})
+        known = tenant.known or {}
+        return render(request, "known.html", {
+            "tenant": tenant, "known": known, "saved": False, "mutable_kinds": MUTABLE_KINDS,
+            "counts": _known_counts(conn, tenant_id, known)})
 
     @app.post("/t/{tenant_id}/known")
     async def known_activity_save(request: Request, tenant_id: str, conn=Depends(db_conn)):
@@ -205,17 +307,40 @@ def register_routes(app: FastAPI) -> None:
         if not tenant:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
         muted = [key for key, _, _ in MUTABLE_KINDS if form.get(f"mute__{key}")]
-        known = {"users": _split_lines(form.get("users", "")), "ips": _split_lines(form.get("ips", "")),
-                "windows": _parse_windows(form.get("windows", "")), "notes": _split_lines(form.get("notes", "")),
-                "muted_kinds": muted}
-        cfg.save_tenant(conn, id=tenant_id, base_url=tenant.base_url, username=tenant.username,
-                        password=None, tenant_name_override=tenant.tenant_name_override,
-                        log_category_no=tenant.log_category_no, log_tz=tenant.log_tz,
-                        display_tz=tenant.display_tz, schedule_cron=tenant.schedule.get("daily", "30 3 * * *"),
-                        llm_enabled=tenant.llm.get("enabled", True), llm_redact=tenant.llm.get("redact", True),
-                        digest_email_to=tenant.digest.get("email_to", []), known=known, enabled=tenant.enabled)
-        return render(request, "known.html", {"tenant": cfg.get_tenant(conn, tenant_id),
-                                              "known": known, "saved": True, "mutable_kinds": MUTABLE_KINDS})
+        known = dict(tenant.known or {})
+        known.update({"windows": _parse_windows(form.get("windows", "")),
+                      "notes": _split_lines(form.get("notes", "")), "muted_kinds": muted})
+        _save_known(conn, tenant, known)
+        _reapply_suppression(conn, tenant_id, cfg.get_tenant(conn, tenant_id))
+        return render(request, "known.html", {
+            "tenant": cfg.get_tenant(conn, tenant_id), "known": known, "saved": True,
+            "mutable_kinds": MUTABLE_KINDS, "counts": _known_counts(conn, tenant_id, known)})
+
+    @app.post("/t/{tenant_id}/known/add")
+    def known_add(request: Request, tenant_id: str, conn=Depends(db_conn),
+                  kind: str = Form(...), value: str = Form(...)):
+        tenant = cfg.get_tenant(conn, tenant_id)
+        if not tenant or kind not in ("users", "ips") or not value.strip():
+            return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
+        known = dict(tenant.known or {})
+        value = value.strip().lower() if kind == "users" else value.strip()
+        items = set(known.get(kind, []) or [])
+        items.add(value)
+        known[kind] = sorted(items)
+        _save_known(conn, tenant, known)
+        _reapply_suppression(conn, tenant_id, cfg.get_tenant(conn, tenant_id))
+        return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
+
+    @app.post("/t/{tenant_id}/known/remove")
+    def known_remove(request: Request, tenant_id: str, conn=Depends(db_conn),
+                      kind: str = Form(...), value: str = Form(...)):
+        tenant = cfg.get_tenant(conn, tenant_id)
+        if not tenant or kind not in ("users", "ips"):
+            return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
+        known = dict(tenant.known or {})
+        known[kind] = [v for v in (known.get(kind, []) or []) if v != value]
+        _save_known(conn, tenant, known)
+        return RedirectResponse(url=f"/t/{tenant_id}/known", status_code=303)
 
     # --- Admin: tenants/servers ------------------------------------------------------------
 
@@ -469,6 +594,34 @@ def _row_from_form(form) -> dict:
         "llm_enabled": bool(get("llm_enabled")), "llm_redact": bool(get("llm_redact")),
         "digest_email_to": _split_emails(get("digest_email_to")), "enabled": bool(get("enabled")),
     }
+
+
+def _group_for_display(findings: list[dict], display_tz: str) -> list[dict]:
+    """Collapse findings that share a rule and calendar day into one expandable row when
+    there are 3 or more - e.g. 130 separate "New user: X" rows become one "130 new_entity
+    findings on 28 Sep" row you can open, instead of 130 lines of near-identical noise.
+    Order-preserving: a group appears where its first (most recent) member would have."""
+    tz = ZoneInfo(display_tz)
+    buckets: dict[tuple, list[dict]] = {}
+    for f in findings:
+        key = (f["rule_id"], f["last_ts"].astimezone(tz).date())
+        buckets.setdefault(key, []).append(f)
+
+    items: list[dict] = []
+    seen: set[tuple] = set()
+    for f in findings:
+        key = (f["rule_id"], f["last_ts"].astimezone(tz).date())
+        if key in seen:
+            continue
+        seen.add(key)
+        bucket = buckets[key]
+        if len(bucket) >= 3:
+            worst = min(bucket, key=lambda x: SEV_ORDER[x["severity"]])
+            items.append({"kind": "group", "rule_id": key[0], "day": key[1], "members": bucket,
+                          "severity": worst["severity"]})
+        else:
+            items.extend({"kind": "row", "f": b} for b in bucket)
+    return items
 
 
 def _split_emails(raw: str) -> list[str]:

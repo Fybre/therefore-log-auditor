@@ -2,7 +2,30 @@
 {% block title %}{{ tenant.id }} findings - Therefore Log Auditor{% endblock %}
 {% block content %}
 <h1>{{ tenant.id }} &middot; findings</h1>
-<form class="filters" method="get">
+
+<div class="summary">
+  {% for s in ["high", "medium", "low", "info"] %}
+  <a class="sum-pill {{ 'active' if s == min_severity }}"
+     href="?min_severity={{ s }}&status={{ status }}&days={{ days }}&rule={{ rule }}">
+    <span class="badge {{ s }}">{{ s }}</span> {{ severity_counts.get(s, 0) }}
+  </a>
+  {% endfor %}
+  <span class="muted" style="margin-left:auto;font-size:12px">{{ total }} total in range</span>
+</div>
+
+{% if rule_counts %}
+<div class="summary" style="margin-top:4px">
+  {% for r in rule_counts %}
+  <a class="sum-pill {{ 'active' if r.rule_id == rule }}"
+     href="?min_severity={{ min_severity }}&status={{ status }}&days={{ days }}&rule={{ '' if r.rule_id == rule else r.rule_id }}">
+    <code>{{ r.rule_id }}</code> {{ r.n }}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<form class="filters" method="get" style="margin-top:10px">
+  <input type="hidden" name="rule" value="{{ rule }}">
   <select name="min_severity" onchange="this.form.submit()">
     {% for s in ["high", "medium", "low", "info"] %}
     <option value="{{ s }}" {% if s == min_severity %}selected{% endif %}>{{ s }}+ severity</option>
@@ -19,12 +42,13 @@
     <option value="{{ d }}" {% if d == days %}selected{% endif %}>last {{ d }} days</option>
     {% endfor %}
   </select>
+  {% if rule %}<span class="pill">rule: {{ rule }} <a href="?min_severity={{ min_severity }}&status={{ status }}&days={{ days }}" style="color:inherit">&times;</a></span>{% endif %}
   <noscript><button type="submit">Filter</button></noscript>
 </form>
 
 <form id="bulkForm" method="post" action="/t/{{ tenant.id }}/findings/bulk-review">
   <input type="hidden" name="return_qs"
-         value="min_severity={{ min_severity }}&status={{ status }}&days={{ days }}">
+         value="min_severity={{ min_severity }}&status={{ status }}&days={{ days }}&rule={{ rule }}">
   <div class="filters" style="display:flex;align-items:center;gap:8px;background:#fff;padding:8px 12px;border-radius:8px;margin-bottom:8px">
     <span id="selCount" class="muted" style="font-size:13px">0 selected</span>
     <select name="status" required>
@@ -39,9 +63,35 @@
   <table>
     <tr>
       <th style="width:24px"><input type="checkbox" id="selAll" onclick="toggleAll(this)"></th>
-      <th>Severity</th><th>Title</th><th>Rule</th><th>Status</th><th>Verdict</th><th>Last seen</th>
+      <th style="width:70px">Severity</th><th>Finding</th><th style="width:110px">Last seen</th>
     </tr>
-    {% for f in findings %}
+    {% for entry in items %}
+    {% if entry.kind == "group" %}
+    <tr class="group-row">
+      <td></td>
+      <td><span class="badge {{ entry.severity }}">{{ entry.severity }}</span></td>
+      <td colspan="2">
+        <details>
+          <summary>{{ entry.members | length }} <code>{{ entry.rule_id }}</code> findings on {{ entry.day.strftime("%d %b %Y") }}
+            <a class="row-link muted" href="?min_severity={{ min_severity }}&status={{ status }}&days={{ days }}&rule={{ entry.rule_id }}" style="margin-left:6px;font-size:12px">(filter to just this rule)</a></summary>
+          <table style="margin-top:6px">
+            {% for f in entry.members %}
+            <tr>
+              <td style="width:24px"><input type="checkbox" class="row-check" name="ids" value="{{ f.id }}" onclick="updateCount()"></td>
+              <td style="width:70px"><span class="badge {{ f.severity }}">{{ f.severity }}</span></td>
+              <td>
+                <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ f.id }}">{{ f.title }}</a>
+                <span class="muted" style="font-size:12px">{{ f.status }}{% if f.llm_verdict %} &middot; {{ f.llm_verdict }}{% endif %}</span>
+              </td>
+              <td class="muted" style="width:110px;white-space:nowrap">{{ f.last_ts | local_time(tenant.display_tz) }}</td>
+            </tr>
+            {% endfor %}
+          </table>
+        </details>
+      </td>
+    </tr>
+    {% else %}
+    {% set f = entry.f %}
     <tr>
       <td><input type="checkbox" class="row-check" name="ids" value="{{ f.id }}" onclick="updateCount()"></td>
       <td><span class="badge {{ f.severity }}">{{ f.severity }}</span></td>
@@ -49,14 +99,15 @@
         <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ f.id }}">{{ f.title }}</a>
         {% if f.incident_size and f.incident_size > 1 %}<span class="pill">{{ f.incident_size }} related</span>{% endif %}
         {% if f.suppressed_by %}<span class="pill">{{ f.suppressed_by }}</span>{% endif %}
+        <div class="muted" style="font-size:12px;margin-top:2px">
+          <code>{{ f.rule_id }}</code> &middot; {{ f.status }}{% if f.llm_verdict %} &middot; {{ f.llm_verdict }}{% endif %}
+        </div>
       </td>
-      <td class="muted">{{ f.rule_id }}</td>
-      <td>{{ f.status }}</td>
-      <td class="muted">{{ f.llm_verdict or "-" }}</td>
-      <td class="muted">{{ f.last_ts | local_time(tenant.display_tz) }}</td>
+      <td class="muted" style="white-space:nowrap">{{ f.last_ts | local_time(tenant.display_tz) }}</td>
     </tr>
+    {% endif %}
     {% else %}
-    <tr><td colspan="7" class="muted">No findings match these filters.</td></tr>
+    <tr><td colspan="4" class="muted">No findings match these filters.</td></tr>
     {% endfor %}
   </table>
 </form>

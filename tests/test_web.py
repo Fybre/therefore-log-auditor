@@ -218,9 +218,12 @@ def test_known_activity_edit_persists_and_suppresses(client):
     assert r.status_code == 200
     assert "downgraded to" in r.text   # the purpose paragraph is present
 
+    r = client.post("/t/webtest/known/add", data={"kind": "users", "value": "alice"}, follow_redirects=False)
+    assert r.status_code == 303
+    client.post("/t/webtest/known/add", data={"kind": "users", "value": "bob"})
+    client.post("/t/webtest/known/add", data={"kind": "ips", "value": "10.0.0.5"})
+
     r = client.post("/t/webtest/known", data={
-        "users": "alice\nbob",
-        "ips": "10.0.0.5",
         "windows": "2026-01-01T00:00:00+00:00 to 2026-01-02T00:00:00+00:00: planned change",
         "notes": "alice is the new admin",
     }, follow_redirects=False)
@@ -231,11 +234,96 @@ def test_known_activity_edit_persists_and_suppresses(client):
     conn = db.connect(DB)
     tenant = cfg.get_tenant(conn, "webtest")
     conn.close()
-    assert tenant.known["users"] == ["alice", "bob"]
+    assert set(tenant.known["users"]) == {"alice", "bob", "svc.logaudit"}
     assert tenant.known["ips"] == ["10.0.0.5"]
     assert tenant.known["windows"] == [{"start": "2026-01-01T00:00:00+00:00",
                                         "end": "2026-01-02T00:00:00+00:00", "note": "planned change"}]
     assert tenant.known["notes"] == ["alice is the new admin"]
+
+
+def test_known_add_remove_updates_suppression_immediately(client):
+    """Adding a known user via the quick add-row should immediately downgrade any matching
+    open finding, not wait for the next scheduled run."""
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.post("/t/webtest/known/add", data={"kind": "users", "value": "mallory"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("SELECT severity, suppressed_by FROM findings WHERE tenant_id='webtest' AND id=1")
+        row = cur.fetchone()
+    conn.close()
+    assert row["severity"] == "info"
+    assert row["suppressed_by"] == "known user"
+
+    r = client.post("/t/webtest/known/remove", data={"kind": "users", "value": "mallory"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    conn.close()
+    assert "mallory" not in tenant.known.get("users", [])
+
+
+def test_suppress_from_finding_marks_user_known(client):
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.post("/t/webtest/findings/1/suppress", data={"action": "know_user"}, follow_redirects=False)
+    assert r.status_code == 303
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    with conn.cursor() as cur:
+        cur.execute("SELECT severity FROM findings WHERE tenant_id='webtest' AND id=1")
+        row = cur.fetchone()
+    conn.close()
+    assert "mallory" in tenant.known.get("users", [])
+    assert row["severity"] == "info"
+
+
+def test_group_for_display_rolls_up_three_or_more():
+    from auditor.web.app import _group_for_display
+    now = dt.datetime(2026, 1, 1, 10, tzinfo=dt.timezone.utc)
+    rows = [{"id": i, "rule_id": "new_entity", "severity": "medium", "last_ts": now,
+             "title": f"New user: u{i}", "status": "open", "llm_verdict": None,
+             "incident_key": None, "suppressed_by": None, "incident_size": 1} for i in range(3)]
+    items = _group_for_display(rows, "UTC")
+    assert len(items) == 1
+    assert items[0]["kind"] == "group"
+    assert len(items[0]["members"]) == 3
+
+
+def test_group_for_display_leaves_pairs_ungrouped():
+    from auditor.web.app import _group_for_display
+    now = dt.datetime(2026, 1, 1, 10, tzinfo=dt.timezone.utc)
+    rows = [{"id": i, "rule_id": "new_entity", "severity": "medium", "last_ts": now,
+             "title": f"New user: u{i}", "status": "open", "llm_verdict": None,
+             "incident_key": None, "suppressed_by": None, "incident_size": 1} for i in range(2)]
+    items = _group_for_display(rows, "UTC")
+    assert len(items) == 2
+    assert all(i["kind"] == "row" for i in items)
+
+
+def test_findings_page_shows_summary_and_rollup(client):
+    from auditor import config as cfg
+    from auditor import db
+    from auditor.rules.engine import Finding, save_findings
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    now = dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=5)
+    extra = [Finding(rule_id="new_entity", dedupe_key=f"user:u{i}", title=f"New user: u{i}",
+                     severity="medium", first_ts=now, last_ts=now, subject_users=[f"u{i}"])
+             for i in range(4)]
+    save_findings(conn, tenant, extra)
+    conn.close()
+
+    _login(client)
+    r = client.get("/t/webtest/findings?min_severity=info")
+    assert r.status_code == 200
+    assert "new_entity" in r.text
+    assert "findings on" in r.text   # the rollup summary text
 
 
 def test_admin_create_user_and_login_as_them(client):

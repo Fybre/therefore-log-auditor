@@ -10,6 +10,35 @@
   {% if f.suppressed_by %}&middot; suppressed: {{ f.suppressed_by }}{% endif %}
 </p>
 
+{% if f.subject_users or f.subject_ips or (f.details or {}).get("kind") %}
+<div class="quick-actions">
+  {% if f.subject_users %}
+  <form method="post" action="/t/{{ tenant.id }}/findings/{{ f.id }}/suppress">
+    <input type="hidden" name="action" value="know_user">
+    <button type="submit" title="Adds {{ f.subject_users | join(', ') }} to Known Activity and downgrades matching findings to info">
+      Mark {{ f.subject_users | join(', ') }} as known user{{ "s" if f.subject_users|length > 1 }}
+    </button>
+  </form>
+  {% endif %}
+  {% if f.subject_ips %}
+  <form method="post" action="/t/{{ tenant.id }}/findings/{{ f.id }}/suppress">
+    <input type="hidden" name="action" value="know_ip">
+    <button type="submit" title="Adds {{ f.subject_ips | join(', ') }} to Known Activity and downgrades matching findings to info">
+      Mark {{ f.subject_ips | join(', ') }} as known IP{{ "s" if f.subject_ips|length > 1 }}
+    </button>
+  </form>
+  {% endif %}
+  {% if (f.details or {}).get("kind") %}
+  <form method="post" action="/t/{{ tenant.id }}/findings/{{ f.id }}/suppress">
+    <input type="hidden" name="action" value="mute_kind">
+    <button type="submit" title="Every future {{ f.rule_id }}:{{ f.details.kind }} finding keeps being recorded but is auto-downgraded to info, like a known-user match">
+      Mute all "{{ f.rule_id }}: {{ f.details.kind }}" findings
+    </button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if f.llm_verdict %}
 <div class="card">
   <h2>LLM triage &middot; {{ f.llm_verdict }} ({{ (f.llm_confidence * 100) | round | int }}% confidence, {{ f.llm_model }})</h2>
@@ -19,29 +48,6 @@
   {% endif %}
 </div>
 {% endif %}
-
-{% if incident %}
-<div class="card">
-  <h2>Related findings (same incident)</h2>
-  <ul>
-    {% for i in incident %}
-    <li><span class="badge {{ i.severity }}">{{ i.severity }}</span>
-      <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ i.id }}">{{ i.title }}</a>
-      <span class="muted">({{ i.rule_id }})</span></li>
-    {% endfor %}
-  </ul>
-</div>
-{% endif %}
-
-<div class="card">
-  <h2>Evidence ({{ evidence | length }} lines)</h2>
-  {% if evidence %}
-  <pre class="evidence">{% for e in evidence %}{{ e.ts | local_time(tenant.display_tz) }} | {{ e.username or "-" }} | {{ e.host or "-" }} | {{ e.ip or "-" }} | {{ e.action }} | code={{ e.result_code }}{% if e.obj_doc_no %} | doc={{ e.obj_doc_no }}{% endif %}{% if e.category %} | cat={{ e.category }}{% endif %}{% if e.client %} | client={{ e.client }}{% endif %}{% if e.message %} | {{ e.message }}{% endif %}
-{% endfor %}</pre>
-  {% else %}
-  <p class="muted">No evidence lines recorded.</p>
-  {% endif %}
-</div>
 
 <div class="card">
   <h2>Review</h2>
@@ -58,5 +64,30 @@
     <textarea name="note" placeholder="Note (optional) - fed back to the LLM for future triage of this rule"></textarea>
     <button type="submit">Save review</button>
   </form>
+</div>
+
+{% if incident %}
+<div class="card">
+  <h2>Related findings (same incident)</h2>
+  <ul>
+    {% for i in incident %}
+    <li><span class="badge {{ i.severity }}">{{ i.severity }}</span>
+      <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ i.id }}">{{ i.title }}</a>
+      <span class="muted">({{ i.rule_id }})</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <details {% if evidence|length <= 8 %}open{% endif %}>
+    <summary><strong>Evidence ({{ evidence | length }} lines)</strong></summary>
+    {% if evidence %}
+    <pre class="evidence" style="margin-top:10px">{% for e in evidence %}{{ e.ts | local_time(tenant.display_tz) }} | {{ e.username or "-" }} | {{ e.host or "-" }} | {{ e.ip or "-" }} | {{ e.action }} | code={{ e.result_code }}{% if e.obj_doc_no %} | doc={{ e.obj_doc_no }}{% endif %}{% if e.category %} | cat={{ e.category }}{% endif %}{% if e.client %} | client={{ e.client }}{% endif %}{% if e.message %} | {{ e.message }}{% endif %}
+{% endfor %}</pre>
+    {% else %}
+    <p class="muted">No evidence lines recorded.</p>
+    {% endif %}
+  </details>
 </div>
 {% endblock %}
