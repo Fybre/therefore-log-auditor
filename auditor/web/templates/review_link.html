@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Review finding - Therefore Log Auditor{% endblock %}
+{% block content %}
+<div class="card" style="max-width:520px">
+{% if error %}
+  <h1>Can't do that</h1>
+  <p class="muted">{{ error }}</p>
+  <p class="muted" style="font-size:12px">Log into the dashboard to review this finding directly.</p>
+{% elif done %}
+  <h1>Done</h1>
+  <p>Marked <strong>{{ finding.title }}</strong> ({{ finding.tenant_id }}) as {{ label }}.</p>
+  <p class="muted" style="font-size:12px">You can change this again any time from the dashboard.</p>
+{% else %}
+  <h1>Mark as {{ label }}?</h1>
+  <p><strong>{{ finding.title }}</strong> &middot; {{ finding.tenant_id }}</p>
+  {% if finding.status == payload.a %}
+  <p class="muted">Already marked as {{ label }}.</p>
+  {% else %}
+  <form method="post" action="/review/{{ token }}">
+    <button type="submit" style="padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Confirm</button>
+  </form>
+  <p class="muted" style="font-size:12px;margin-top:10px">This link doesn't require logging in -
+    only the exact link from your digest email works, and it expires after 30 days.</p>
+  {% endif %}
+{% endif %}
+</div>
+{% endblock %}

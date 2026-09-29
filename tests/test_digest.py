@@ -39,6 +39,26 @@ def test_render_with_dashboard_url_links_findings_and_dashboard():
     assert "Open the dashboard" in html_body
 
 
+def test_render_adds_review_links_when_dashboard_url_and_secret_set():
+    tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
+    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None, {},
+                                    dashboard_url="https://audit.example.com", review_secret="s3cret")
+    assert "/review/" in md
+    assert "Mark reviewed" in md and "False positive" in md
+    assert "/review/" in html_body
+    assert "Mark reviewed" in html_body and "False positive" in html_body
+
+
+def test_render_omits_review_links_without_a_secret():
+    """Without AUDITOR_WEB_SECRET configured, review links can't be signed - omit them rather
+    than emit a link that will always show 'invalid or expired'."""
+    tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
+    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None, {},
+                                    dashboard_url="https://audit.example.com", review_secret="")
+    assert "/review/" not in md
+    assert "Mark reviewed" not in html_body
+
+
 def test_render_strips_trailing_slash_from_dashboard_url():
     """Avoids a double slash (.../findings//42) if someone saves the URL with a trailing /."""
     tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")

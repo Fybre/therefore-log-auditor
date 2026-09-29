@@ -12,7 +12,8 @@ from starlette.responses import RedirectResponse
 
 from .. import passwords
 
-PUBLIC_PATHS = {"/login", "/static"}
+PUBLIC_PATHS = {"/login", "/static", "/review"}   # /review/{token}: one-click links in emails,
+                                                   # authenticated by the signed token itself
 
 
 @dataclass

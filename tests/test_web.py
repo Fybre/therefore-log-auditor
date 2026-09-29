@@ -40,7 +40,7 @@ def client(monkeypatch):
     monkeypatch.setenv("AUDITOR_WEB_USER", "tester")
     monkeypatch.setenv("AUDITOR_WEB_PASSWORD", "s3cret")
     monkeypatch.setenv("AUDITOR_WEB_SECRET", "test-secret")
-    settings = Settings(DB, [], {}, "", "", "", {}, None)
+    settings = Settings(DB, [], {}, "", "", "", {}, None, review_link_secret="test-secret")
     app = create_app(settings)
     return TestClient(app)
 
@@ -468,6 +468,54 @@ def test_known_add_remove_updates_suppression_immediately(client):
     tenant = cfg.get_tenant(conn, "webtest")
     conn.close()
     assert "mallory" not in tenant.known.get("users", [])
+
+
+def test_review_link_confirm_then_apply_without_login(client):
+    """The whole point of these links is that the recipient isn't logged in - no _login() call
+    here on purpose."""
+    from auditor import db
+    from auditor import link_tokens
+
+    token = link_tokens.make_token("test-secret", "webtest", 1, "acknowledged")
+
+    r = client.get(f"/review/{token}")
+    assert r.status_code == 200
+    assert "Mark as reviewed?" in r.text
+    assert "New user: mallory" in r.text
+
+    r = client.post(f"/review/{token}")
+    assert r.status_code == 200
+    assert "Done" in r.text
+
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("SELECT status, reviewed_by FROM findings WHERE tenant_id='webtest' AND id=1")
+        row = cur.fetchone()
+        cur.execute("SELECT action, actor, tenant_id FROM admin_audit_log WHERE action='finding.acknowledged'")
+        audit_row = cur.fetchone()
+    conn.close()
+    assert row["status"] == "acknowledged"
+    assert row["reviewed_by"] == "review link (email)"
+    assert audit_row["tenant_id"] == "webtest"
+
+
+def test_review_link_rejects_bad_token(client):
+    r = client.get("/review/not-a-real-token")
+    assert r.status_code == 200
+    assert "invalid or has expired" in r.text
+    r = client.post("/review/not-a-real-token")
+    assert r.status_code == 200
+    assert "invalid or has expired" in r.text
+
+
+def test_review_link_confirm_twice_shows_already_done(client):
+    from auditor import link_tokens
+
+    token = link_tokens.make_token("test-secret", "webtest", 1, "false_positive")
+    client.post(f"/review/{token}")
+    r = client.get(f"/review/{token}")
+    assert r.status_code == 200
+    assert "Already marked as" in r.text
 
 
 def test_known_snooze_add_and_remove(client):

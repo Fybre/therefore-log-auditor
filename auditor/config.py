@@ -73,6 +73,7 @@ class Settings:
     reports_dir: Path
     dashboard_url: str = ""   # e.g. https://audit.example.com - used to link back from digest emails
     alert_email_to: list[str] = field(default_factory=list)   # scheduler self-health alerts, see health.py
+    review_link_secret: str = ""   # signs one-click review links in digest emails, see link_tokens.py
 
     def tenant(self, tenant_id: str) -> Tenant:
         for t in self.tenants:
@@ -102,6 +103,7 @@ def load_settings() -> Settings:
         llm_model=os.environ.get("LLM_MODEL", ""),
         smtp={"host": "", "port": 587, "user": "", "password": "", "from": "", "starttls": True},
         reports_dir=Path(os.environ.get("AUDITOR_REPORTS_DIR", ROOT / "reports")),
+        review_link_secret=os.environ.get("AUDITOR_WEB_SECRET", ""),
     )
 
 

@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import audit
 from .. import config as cfg
+from .. import link_tokens
 from .. import passwords
 from ..config import Settings, load_settings
 from ..db import connect, migrate
@@ -141,6 +142,45 @@ def register_routes(app: FastAPI) -> None:
     def logout(request: Request):
         request.session.clear()
         return RedirectResponse(url="/login", status_code=303)
+
+    # --- One-click review links (from digest emails; no login) --------------------------
+
+    ACTION_LABELS = {"acknowledged": "reviewed", "false_positive": "a false positive"}
+
+    def _review_context(conn, request: Request, token: str) -> dict:
+        settings: Settings = request.app.state.settings
+        payload = link_tokens.verify_token(settings.review_link_secret, token)
+        if not payload:
+            return {"error": "This link is invalid or has expired."}
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, tenant_id, title, status FROM findings WHERE id=%s AND tenant_id=%s",
+                        (payload["f"], payload["t"]))
+            finding = cur.fetchone()
+        if not finding:
+            return {"error": "This finding no longer exists."}
+        return {"payload": payload, "finding": finding, "label": ACTION_LABELS.get(payload["a"], payload["a"])}
+
+    @app.get("/review/{token}")
+    def review_link_confirm(request: Request, token: str, conn=Depends(db_conn)):
+        ctx = _review_context(conn, request, token)
+        return render(request, "review_link.html", {**ctx, "token": token, "done": False})
+
+    @app.post("/review/{token}")
+    def review_link_apply(request: Request, token: str, conn=Depends(db_conn)):
+        ctx = _review_context(conn, request, token)
+        if "error" not in ctx:
+            payload, finding = ctx["payload"], ctx["finding"]
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE findings SET status=%s, reviewed_by=%s, reviewed_note=%s, reviewed_at=now()
+                       WHERE tenant_id=%s AND id=%s""",
+                    (payload["a"], "review link (email)", "via one-click email link",
+                     payload["t"], payload["f"]))
+            conn.commit()
+            audit.log_action(conn, "review link (email)", f"finding.{payload['a']}",
+                             tenant_id=payload["t"], detail={"finding_id": payload["f"]})
+            ctx["finding"] = {**finding, "status": payload["a"]}
+        return render(request, "review_link.html", {**ctx, "token": token, "done": True})
 
     # --- Findings ------------------------------------------------------------------------
 

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 import psycopg
 
+from . import link_tokens
 from .config import Settings, Tenant
 
 log = logging.getLogger(__name__)
@@ -56,7 +57,7 @@ def gather(conn: psycopg.Connection, tenant: Tenant, since: dt.datetime) -> dict
 
 
 def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
-          dashboard_url: str = "") -> tuple[str, str, str]:
+          dashboard_url: str = "", review_secret: str = "") -> tuple[str, str, str]:
     dashboard_url = (dashboard_url or "").rstrip("/")
     tz = ZoneInfo(tenant.display_tz)
     today = dt.datetime.now(tz).strftime("%a %d %b %Y")
@@ -73,6 +74,12 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
 
     def finding_url(f):
         return f"{dashboard_url}/t/{tenant.id}/findings/{f['id']}" if dashboard_url else None
+
+    def review_url(f, action):
+        if not dashboard_url:
+            return None
+        token = link_tokens.make_token(review_secret, tenant.id, f["id"], action)
+        return f"{dashboard_url}/review/{token}" if token else None
 
     # Markdown
     md = [f"# Therefore audit - {tenant.id} - {today}", ""]
@@ -101,6 +108,9 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
             md += ["", head["llm_explanation"]]
         for a in head["llm_actions"] or []:
             md.append(f"- {a}")
+        ack_url, fp_url = review_url(head, "acknowledged"), review_url(head, "false_positive")
+        if ack_url and fp_url:
+            md += ["", f"[Mark reviewed]({ack_url}) | [False positive]({fp_url})"]
         md.append("")
     info = [f for f in data["findings"] if f["severity"] == "info"]
     if info:
@@ -123,6 +133,12 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
         url = finding_url(head)
         title_html = (f'<a href="{html.escape(url)}" style="color:#101828;text-decoration:underline">'
                       f'{html.escape(titles[0])}</a>') if url else html.escape(titles[0])
+        ack_url, fp_url = review_url(head, "acknowledged"), review_url(head, "false_positive")
+        review_links_html = (
+            f'<div style="margin-top:6px;font-size:12px">'
+            f'<a href="{html.escape(ack_url)}" style="color:#0369a1">Mark reviewed</a>'
+            f' &middot; <a href="{html.escape(fp_url)}" style="color:#0369a1">False positive</a></div>'
+        ) if ack_url and fp_url else ""
         rows.append(f"""
 <tr><td style="padding:12px 0;border-top:1px solid #eaecf0">
   <span style="color:#fff;background:{SEV_COLOUR[head['severity']]};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600">{head['severity'].upper()}</span>
@@ -132,6 +148,7 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
   {members_html}
   {('<p style="margin:6px 0">' + html.escape(head['llm_explanation']) + '</p>') if head['llm_explanation'] else ''}
   {('<ul style="margin:4px 0 0 18px;padding:0">' + actions + '</ul>') if actions else ''}
+  {review_links_html}
 </td></tr>""")
     fresh = "".join(f"<li>{html.escape(r['application'])}: last file {r['generated']}, last event {local(r['last_event'])}</li>"
                     for r in data["freshness"])
