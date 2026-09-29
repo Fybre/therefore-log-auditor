@@ -132,3 +132,36 @@ def test_muting_overrides_severity_even_after_llm_triage():
     conn.close()
     assert row["severity"] == "info"
     assert row["suppressed_by"] == "muted category"
+
+
+def test_brute_force_ignores_license_limit_failures():
+    """Regression: result_code 25 ("All Named User license points are currently in use") is a
+    licensing bottleneck, not password guessing - it already has its own rule (licence_limit).
+    Before this fix, a burst of license-exhaustion failures across a few real users read as a
+    password spray, and one user's later successful login read as success-after-failures.
+    Found on canonservice, 29 Sep."""
+    import yaml
+    from auditor import collector, db
+    from auditor.rules.engine import Context, run_rules
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    conn.commit()
+    db.migrate(conn)
+    tenant = Tenant(id="t4", base_url="https://t4.thereforeonline.com", known={"users": []})
+    rules = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "..", "config", "rules.yaml")))["rules"]
+    settings = Settings(DB, [tenant], rules, "", "", "", {}, None)
+    base = dt.datetime(2026, 1, 1, 9, 0)
+    license_msg = "failed: Failed to connect to Therefore Server. All Named User license points are currently in use.   - Web Client 35.0.3"
+    # One IP, three different users, all failing purely on license exhaustion - looks like a
+    # spray by count alone - then one of them gets in once a license frees up.
+    fails = _lines(base, 6, lambda t, i: f"{t:%Y-%m-%d, %H:%M:%S}|user{i % 3}|SHARED (5.5.5.5)|Connect|25||||||{license_msg}")
+    ok = f"{base + dt.timedelta(minutes=5):%Y-%m-%d, %H:%M:%S}|user0|SHARED (5.5.5.5)|Connect|0||||||Web Client 35.0.3"
+    raw = "\n".join([fails, ok]).encode()
+    collector.store_file(conn, tenant, LogDoc(1, "Therefore Server", "srv", base.date(), 4, None), "Server1U.txt", raw)
+    ctx = Context(conn, settings, tenant, dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc),
+                  dt.datetime(2026, 3, 1, tzinfo=dt.timezone.utc), realtime=False)
+    found = {(f.rule_id, f.dedupe_key) for f in run_rules(ctx)}
+    conn.close()
+    assert not any(rule_id in ("brute_force", "success_after_failures") for rule_id, _ in found)
+    assert any(rule_id == "licence_limit" for rule_id, _ in found)

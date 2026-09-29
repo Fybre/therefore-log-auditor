@@ -8,15 +8,20 @@ rules:
     min_failures_per_user: 5
     spray_window_minutes: 60
     min_users_per_ip: 3
-    # Token expiry/format failures are client housekeeping, not password guessing.
-    ignore_result_codes: [148, 149, 154]
+    # Token expiry/format failures are client housekeeping, not password guessing; 25 is
+    # "All Named User license points are currently in use" - a licensing bottleneck, not a
+    # credential-guessing signal, and already has its own dedicated rule (licence_limit).
+    # Without this, a run of license-exhaustion failures across a few real users during a busy
+    # period reads as a password spray (seen on canonservice, 29 Sep - confirmed the same
+    # events were already correctly caught by licence_limit).
+    ignore_result_codes: [25, 148, 149, 154]
 
   success_after_failures:
     enabled: true
     severity: high
     lookback_minutes: 120
     min_failures: 2
-    ignore_result_codes: [148, 149, 154]
+    ignore_result_codes: [25, 148, 149, 154]
 
   new_entity:
     enabled: true
