@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Audit log - Therefore Log Auditor{% endblock %}
+{% block content %}
+<h1>Admin audit log</h1>
+<p class="muted">Changes made to the auditor's own configuration - tenants, SMTP, rule toggles,
+  dashboard accounts. This is separate from the findings the auditor raises about a tenant's
+  Therefore activity. Showing the most recent {{ entries | length }} entries, newest first.</p>
+<table>
+  <tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Tenant</th><th>Detail</th></tr>
+  {% for e in entries %}
+  <tr>
+    <td class="muted" style="white-space:nowrap">{{ e.at.strftime("%d %b %Y %H:%M:%S") }}</td>
+    <td>{{ e.actor }}</td>
+    <td><code>{{ e.action }}</code></td>
+    <td class="muted">{{ e.tenant_id or "-" }}</td>
+    <td class="muted" style="font-size:12px">
+      {% for k, v in (e.detail or {}).items() %}{{ k }}=<code>{{ v }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="muted">Nothing logged yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

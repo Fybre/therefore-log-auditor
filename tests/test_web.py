@@ -168,6 +168,58 @@ def test_admin_general_dashboard_url_save_and_reload(client):
     assert general["dashboard_url"] == "https://audit.example.com"   # trailing slash stripped
 
 
+def test_admin_actions_are_audited(client):
+    """SMTP save, general save, and dashboard-account changes should all leave a trace of who
+    did what - separate from the findings this app raises about tenants' own activity."""
+    from auditor import db
+
+    _login(client)
+    client.post("/admin/smtp", data={"host": "smtp.example.com", "port": "587", "user": "bot",
+                "password": "hunter2", "from_addr": "bot@example.com", "starttls": "true"})
+    client.post("/admin/general", data={"dashboard_url": "https://audit.example.com"})
+    client.post("/admin/users/new", data={"username": "newbie", "password": "s3cret-pw"})
+
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("SELECT action, actor, detail FROM admin_audit_log ORDER BY id")
+        rows = cur.fetchall()
+    conn.close()
+
+    actions = [r["action"] for r in rows]
+    assert "smtp.save" in actions
+    assert "general.save" in actions
+    assert "user.create" in actions
+    smtp_row = next(r for r in rows if r["action"] == "smtp.save")
+    assert smtp_row["actor"] == "tester"
+    assert "hunter2" not in str(smtp_row["detail"])   # never logs the actual password
+    assert smtp_row["detail"]["password_changed"] is True
+
+    r = client.get("/admin/audit")
+    assert r.status_code == 200
+    assert "smtp.save" in r.text
+    assert "hunter2" not in r.text
+
+
+def test_tenant_crud_is_audited(client):
+    from auditor import db
+
+    _login(client)
+    client.post("/admin/tenants/new", data={
+        "id": "audited", "base_url": "https://audited.thereforeonline.com",
+        "username": "svc", "password": "pw", "schedule_hour": "3", "schedule_minute": "30"})
+    client.post(f"/admin/tenants/audited/edit", data={
+        "base_url": "https://audited.thereforeonline.com", "username": "svc2",
+        "schedule_hour": "3", "schedule_minute": "30"})
+    client.post("/admin/tenants/audited/delete", data={"confirm": "audited"})
+
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("SELECT action, tenant_id FROM admin_audit_log WHERE tenant_id='audited' ORDER BY id")
+        rows = cur.fetchall()
+    conn.close()
+    assert [r["action"] for r in rows] == ["tenant.create", "tenant.update", "tenant.delete"]
+
+
 def test_admin_smtp_save_and_reload(client):
     from auditor import config as cfg
     from auditor import db

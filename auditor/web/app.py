@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .. import audit
 from .. import config as cfg
 from .. import passwords
 from ..config import Settings, load_settings
@@ -72,6 +73,11 @@ def db_conn(request: Request):
         yield conn
     finally:
         conn.close()
+
+
+def _actor(request: Request) -> str:
+    user = auth.current_user(request)
+    return user.username if user else "unknown"
 
 
 def _save_known(conn, tenant: cfg.Tenant, known: dict) -> None:
@@ -492,6 +498,8 @@ def register_routes(app: FastAPI) -> None:
                         schedule_cron=schedule_cron, llm_enabled=llm_enabled, llm_redact=llm_redact,
                         digest_email_to=_split_emails(digest_email_to),
                         digest_only_on_new=digest_only_on_new, known={}, enabled=enabled)
+        audit.log_action(conn, _actor(request), "tenant.create", tenant_id=id,
+                         detail={"base_url": base_url, "username": username, "enabled": enabled})
         return RedirectResponse(url="/admin/tenants", status_code=303)
 
     @app.post("/admin/tenants/{tenant_id}/edit")
@@ -514,6 +522,9 @@ def register_routes(app: FastAPI) -> None:
                         digest_email_to=_split_emails(digest_email_to),
                         digest_only_on_new=digest_only_on_new,
                         known=(existing.known if existing else {}), enabled=enabled)
+        audit.log_action(conn, _actor(request), "tenant.update", tenant_id=tenant_id,
+                         detail={"base_url": base_url, "username": username, "enabled": enabled,
+                                 "password_changed": bool(password)})
         return RedirectResponse(url="/admin/tenants", status_code=303)
 
     @app.post("/admin/tenants/{tenant_id}/delete")
@@ -521,6 +532,7 @@ def register_routes(app: FastAPI) -> None:
                              confirm: str = Form("")):
         if confirm == tenant_id:
             cfg.delete_tenant(conn, tenant_id)
+            audit.log_action(conn, _actor(request), "tenant.delete", tenant_id=tenant_id)
         return RedirectResponse(url="/admin/tenants", status_code=303)
 
     @app.post("/admin/tenants/{tenant_id}/run")
@@ -538,6 +550,8 @@ def register_routes(app: FastAPI) -> None:
         # configured or how recently.
         cfg.refresh_from_db(request.app.state.settings, conn)
         stats = run_tenant(request.app.state.settings, tenant)
+        audit.log_action(conn, _actor(request), "tenant.run", tenant_id=tenant_id,
+                         detail={"findings": stats.get("findings"), "error": stats.get("error")})
         return render(request, "admin_tenant_run_result.html", {"tenant_id": tenant_id, "stats": stats})
 
     @app.get("/admin/tenants/{tenant_id}/rules")
@@ -589,6 +603,7 @@ def register_routes(app: FastAPI) -> None:
                 if value != defaults.get(key):   # only store what actually differs from the default
                     config_obj[key] = value
             cfg.set_rule_setting(conn, tenant_id, rule_id, enabled, config_obj)
+        audit.log_action(conn, _actor(request), "tenant.rules.save", tenant_id=tenant_id)
         return RedirectResponse(url=f"/admin/tenants/{tenant_id}/rules", status_code=303)
 
     # --- Admin: SMTP -------------------------------------------------------------------
@@ -604,6 +619,9 @@ def register_routes(app: FastAPI) -> None:
                          from_addr: str = Form(""), starttls: bool = Form(False)):
         cfg.save_smtp(conn, host=host, port=port, user=user, password=(password or None),
                       from_addr=from_addr, starttls=starttls)
+        audit.log_action(conn, _actor(request), "smtp.save",
+                         detail={"host": host, "port": port, "user": user, "from": from_addr,
+                                 "starttls": starttls, "password_changed": bool(password)})
         smtp = cfg.load_smtp(conn)
         return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True, "general": cfg.load_general(conn)})
 
@@ -611,6 +629,8 @@ def register_routes(app: FastAPI) -> None:
     def admin_general_save(request: Request, conn=Depends(db_conn), dashboard_url: str = Form(""),
                             alert_email_to: str = Form("")):
         cfg.save_general(conn, dashboard_url=dashboard_url, alert_email_to=_split_emails(alert_email_to))
+        audit.log_action(conn, _actor(request), "general.save",
+                         detail={"dashboard_url": dashboard_url, "alert_email_to": _split_emails(alert_email_to)})
         smtp = cfg.load_smtp(conn) or {"host": "", "port": 587, "user": "", "from": "", "starttls": True}
         return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True, "general": cfg.load_general(conn)})
 
@@ -670,23 +690,38 @@ def register_routes(app: FastAPI) -> None:
             cur.execute("INSERT INTO web_users (username, password_hash) VALUES (%s, %s)",
                         (username, passwords.hash_password(password)))
         conn.commit()
+        audit.log_action(conn, _actor(request), "user.create", detail={"username": username})
         return RedirectResponse(url="/admin/users", status_code=303)
 
     @app.post("/admin/users/{user_id}/toggle")
     def admin_user_toggle(request: Request, user_id: int, conn=Depends(db_conn)):
         with conn.cursor() as cur:
-            cur.execute("UPDATE web_users SET disabled = NOT disabled WHERE id=%s", (user_id,))
+            cur.execute("UPDATE web_users SET disabled = NOT disabled WHERE id=%s RETURNING username, disabled",
+                        (user_id,))
+            row = cur.fetchone()
         conn.commit()
+        if row:
+            audit.log_action(conn, _actor(request), "user.toggle",
+                             detail={"username": row["username"], "disabled": row["disabled"]})
         return RedirectResponse(url="/admin/users", status_code=303)
 
     @app.post("/admin/users/{user_id}/password")
     def admin_user_password(request: Request, user_id: int, conn=Depends(db_conn),
                              password: str = Form(...)):
         with conn.cursor() as cur:
-            cur.execute("UPDATE web_users SET password_hash=%s WHERE id=%s",
+            cur.execute("UPDATE web_users SET password_hash=%s WHERE id=%s RETURNING username",
                         (passwords.hash_password(password), user_id))
+            row = cur.fetchone()
         conn.commit()
+        if row:
+            audit.log_action(conn, _actor(request), "user.password_reset", detail={"username": row["username"]})
         return RedirectResponse(url="/admin/users", status_code=303)
+
+    # --- Admin: audit log -----------------------------------------------------------------
+
+    @app.get("/admin/audit")
+    def admin_audit(request: Request, conn=Depends(db_conn)):
+        return render(request, "admin_audit.html", {"entries": audit.recent(conn)})
 
 
 def _test_tenant_from_form(form) -> cfg.Tenant:
