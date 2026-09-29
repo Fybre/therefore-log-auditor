@@ -176,10 +176,16 @@ Behaviours worth knowing:
   a Bearer token, so the auditor uses Basic auth and keeps its calls to a handful per run.
 - **Settings are readable via `GetSettings`** (integer keys, undocumented):
   700 = LogMask XML (52 positional values: 0 do not log, 1 failure, 3 always; 2 = success is
-  presumed), 701 archive mode (1 = daily), 702 weekday, 703 archive time in minutes after
-  midnight UTC (1020), 704 split size in MB. **One unknown key fails the whole batch**, and key 4
-  is "not accessible". This is documented in the therefore-api skill (pitfall #39) and in the
-  therefore-mcp knowledge base, both pushed to GitHub.
+  presumed - see the LogMask position map below), 701 archive mode, 702 weekday, 703 archive
+  time in minutes after midnight UTC (1020 confirmed = 17:00 UTC), 704 split size in MB.
+  **One unknown key fails the whole batch**, and key 4 is "not accessible". This is documented
+  in the therefore-api skill (pitfall #39) and in the therefore-mcp knowledge base, both pushed
+  to GitHub.
+  - **701 (archive mode) confirmed values:** `1` = Every day, `2` = Every week. Monthly and
+    by-size not yet tested.
+  - **702 (weekday, only meaningful in weekly mode) confirmed values:** `1` = Sunday,
+    `2` = Monday - a 1-indexed week starting Sunday (so presumably `3`=Tue ... `7`=Sat, untested
+    beyond Sun/Mon but the pattern is clear).
 - Content Connector's "Start collaboration" is set to "Do not log" on craigdemo, although the
   documented default is Always.
 
