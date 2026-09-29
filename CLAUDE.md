@@ -2,7 +2,16 @@
 
 Context for continuing this project in Claude Code. It records the project's purpose, what has
 been built, what was learned about Therefore logging, and what is still to do.
-Last updated: 29 Sep 2026 (end of the first working session).
+Last updated: 30 Sep 2026.
+
+Session of 30 Sep added (all tested, verified live, committed and pushed): a canonservice
+false-positive fix (licence exhaustion misread as password spray), a digest open-backlog summary
++ configurable dashboard link, a per-tenant "only email on new findings" option, a fix for a
+Docker volume mount that silently dropped web-triggered reports, an `obj_version` bigint fix for
+an ingestion overflow bug, a scheduler self-health check with email alerts, time-boxed
+rule/user/IP suppression ("snooze") on the Known Activity page, an admin audit trail
+(`/admin/audit`) for changes to the auditor's own config, and one-click "mark reviewed"/"false
+positive" links in digest emails. See the relevant sections below for each.
 
 ## Purpose
 
