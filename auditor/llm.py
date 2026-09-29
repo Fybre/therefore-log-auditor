@@ -41,7 +41,11 @@ SUMMARY_SCHEMA = {
 
 SYSTEM_TRIAGE = """You are a security and operations analyst reviewing audit findings from a \
 Therefore Online document-management tenant. Deterministic rules raised each finding from the \
-Therefore Server log. Your job: decide whether it is benign, suspicious, malicious, or an \
+Therefore Server log. You may receive a single finding, or several findings that were grouped into \
+one incident because they share the same user/IP and day (e.g. a new user plus a login-after-failures \
+plus first admin-tool use, all in one session) - in that case give ONE overall verdict and severity \
+that covers the whole incident, and write an explanation that ties the findings together rather than \
+treating them separately. Your job: decide whether it is benign, suspicious, malicious, or an \
 operational problem (misconfiguration, failing job), set a severity, and explain it in 2-4 plain \
 sentences an administrator can act on. Be concrete: name the user/IP pseudonyms, counts and times \
 you see. Do not invent facts that are not in the evidence. If the evidence is inconclusive say so \
@@ -233,7 +237,11 @@ def _past_verdicts(conn, tenant_id: str, rule_id: str, exclude_id: int, rd: Reda
 
 def triage(conn: psycopg.Connection, settings: Settings, tenant: Tenant, finding_ids: list[int],
            provider: OpenAICompatProvider | None = None, max_findings: int = 40) -> dict[str, int]:
-    """Triage findings with the LLM. Never raises; failures leave rule severity in place."""
+    """Triage findings with the LLM. Findings sharing an `incident_key` (same primary user/IP,
+    same day) are sent as one incident and get one shared verdict/severity/explanation - this is
+    what lets e.g. a new-user + login-after-failures + first-admin-tool-use sequence for the same
+    person be triaged as a single story instead of three disconnected findings.
+    Never raises; failures leave rule severity in place."""
     stats = {"triaged": 0, "failed": 0, "skipped": 0}
     if not finding_ids or not tenant.llm.get("enabled", True):
         stats["skipped"] = len(finding_ids)
@@ -248,38 +256,47 @@ def triage(conn: psycopg.Connection, settings: Settings, tenant: Tenant, finding
         cur.execute("""SELECT * FROM findings WHERE id = ANY(%s) AND severity <> 'info'
                        ORDER BY array_position(ARRAY['high','medium','low','info'], severity), last_ts DESC""",
                     (finding_ids,))
-        rows = cur.fetchall()
-    stats["skipped"] = len(finding_ids) - min(len(rows), max_findings)
+        rows = cur.fetchall()[:max_findings]
+    stats["skipped"] = len(finding_ids) - len(rows)
     known_notes = _known_notes(tenant)
-    for f in rows[:max_findings]:
+
+    groups: dict[str, list[dict]] = {}
+    for f in rows:
+        groups.setdefault(f["incident_key"] or f"solo:{f['id']}", []).append(f)
+
+    for members in groups.values():
         rd = Redactor(enabled=bool(tenant.llm.get("redact", True)))
-        evidence = _evidence(conn, tenant.id, list(f["evidence_ids"] or []), rd)
-        details = _redact_obj(f["details"], rd)
+        finding_payloads = []
+        for f in members:
+            finding_payloads.append({
+                "rule": f["rule_id"], "title": rd.text(f["title"]), "rule_severity": f["rule_severity"],
+                "first_utc": f["first_ts"].isoformat(), "last_utc": f["last_ts"].isoformat(),
+                "details": _redact_obj(f["details"], rd),
+                "evidence_lines": _evidence(conn, tenant.id, list(f["evidence_ids"] or []), rd),
+            })
         payload = {
-            "finding": {"rule": f["rule_id"], "title": rd.text(f["title"]), "rule_severity": f["rule_severity"],
-                        "first_utc": f["first_ts"].isoformat(), "last_utc": f["last_ts"].isoformat(),
-                        "details": details},
-            "evidence_lines": evidence,
+            "findings": finding_payloads,
             "known_activity_notes": [rd.text(n) for n in known_notes],
-            "past_verdicts_same_rule": _past_verdicts(conn, tenant.id, f["rule_id"], f["id"], rd),
+            "past_verdicts_same_rule": _past_verdicts(conn, tenant.id, members[0]["rule_id"], members[0]["id"], rd),
         }
         try:
             out = provider.complete_json(SYSTEM_TRIAGE, json.dumps(payload, default=str, indent=1),
                                          TRIAGE_SCHEMA, "triage")
         except LLMError as exc:
-            log.warning("Triage failed for finding %s: %s", f["id"], exc)
-            stats["failed"] += 1
+            log.warning("Triage failed for %d finding(s): %s", len(members), exc)
+            stats["failed"] += len(members)
             continue
         conf = max(0.0, min(1.0, float(out.get("confidence") or 0)))
+        explanation = rd.restore(out["explanation"])
+        actions = Jsonb([rd.restore(a) for a in out.get("recommended_actions", [])])
         with conn.cursor() as cur:
             cur.execute("""UPDATE findings SET llm_verdict=%s, severity=%s, llm_confidence=%s,
                                llm_explanation=%s, llm_actions=%s, llm_model=%s, updated_at=now()
-                           WHERE id=%s""",
-                        (out["verdict"], out["severity"], conf, rd.restore(out["explanation"]),
-                         Jsonb([rd.restore(a) for a in out.get("recommended_actions", [])]),
-                         provider.model, f["id"]))
+                           WHERE id = ANY(%s)""",
+                        (out["verdict"], out["severity"], conf, explanation, actions,
+                         provider.model, [f["id"] for f in members]))
         conn.commit()
-        stats["triaged"] += 1
+        stats["triaged"] += len(members)
     stats["tokens"] = provider.usage.total
     return stats
 

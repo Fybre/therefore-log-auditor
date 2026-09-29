@@ -73,12 +73,13 @@ def main(argv: list[str] | None = None) -> int:
         order = ["info", "low", "medium", "high"]
         allowed = order[order.index(a.min_severity):]
         with connect(settings.database_url) as conn, conn.cursor() as cur:
-            cur.execute("""SELECT severity, rule_id, title, last_ts, llm_verdict FROM findings
+            cur.execute("""SELECT severity, rule_id, title, last_ts, llm_verdict, incident_key FROM findings
                            WHERE tenant_id=%s AND last_ts >= now() - %s * interval '1 day' AND severity = ANY(%s)
                            ORDER BY last_ts DESC""", (a.tenant, a.days, allowed))
             for row in cur.fetchall():
                 print(f"{row['last_ts']:%Y-%m-%d %H:%M} {row['severity']:6} {row['rule_id']:22} {row['title']}"
-                      + (f"  [{row['llm_verdict']}]" if row["llm_verdict"] else ""))
+                      + (f"  [{row['llm_verdict']}]" if row["llm_verdict"] else "")
+                      + (f"  (incident: {row['incident_key']})" if row["incident_key"] else ""))
         return 0
     return 1
 

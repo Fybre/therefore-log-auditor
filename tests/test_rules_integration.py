@@ -54,3 +54,49 @@ def test_rules_detect_attack_pattern():
         cur.execute("SELECT count(*) n, count(*) FILTER (WHERE severity='info') i FROM findings WHERE rule_id='mass_delete'")
         r = cur.fetchone()
     assert r["n"] == 1 and r["i"] == 1
+    conn.close()
+
+
+def test_incident_grouping_shares_one_llm_call():
+    """Findings for the same user on the same day (an 'incident') get one combined triage call,
+    and the resulting verdict/severity/explanation is applied to all of them."""
+    from auditor import db
+    from auditor.config import Settings, Tenant
+    from auditor.llm import triage
+    from auditor.rules.engine import Finding, save_findings
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    conn.commit()
+    db.migrate(conn)
+    tenant = Tenant(id="t2", base_url="https://t2.thereforeonline.com", display_tz="UTC")
+    settings = Settings(DB, [tenant], {}, "", "", "", {}, None)
+    now = dt.datetime(2026, 5, 1, 10, 0, tzinfo=dt.timezone.utc)
+    f1 = Finding(rule_id="new_entity", dedupe_key="user:eve", title="New user: eve",
+                 severity="medium", first_ts=now, last_ts=now, subject_users=["eve"])
+    f2 = Finding(rule_id="success_after_failures", dedupe_key="eve", title="eve logged in after failures",
+                 severity="medium", first_ts=now, last_ts=now, subject_users=["eve"])
+    ids = save_findings(conn, tenant, [f1, f2])
+    assert len(ids) == 2
+
+    class FakeProvider:
+        def __init__(self):
+            self.model, self.calls = "fake", 0
+            self.usage = type("U", (), {"total": 0})()
+
+        def complete_json(self, system, user, schema, name, max_tokens=800):
+            self.calls += 1
+            return {"verdict": "suspicious", "severity": "high", "confidence": 0.9,
+                    "explanation": "eve is new and logged in right after failed attempts",
+                    "recommended_actions": ["confirm with eve"]}
+
+    provider = FakeProvider()
+    stats = triage(conn, settings, tenant, ids, provider=provider)
+    assert stats["triaged"] == 2
+    assert provider.calls == 1   # one incident, one call, not two
+    with conn.cursor() as cur:
+        cur.execute("SELECT llm_verdict, severity FROM findings WHERE tenant_id='t2'")
+        rows = cur.fetchall()
+    assert len(rows) == 2
+    assert all(r["llm_verdict"] == "suspicious" and r["severity"] == "high" for r in rows)
+    conn.close()

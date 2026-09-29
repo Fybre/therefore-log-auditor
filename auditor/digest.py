@@ -19,6 +19,14 @@ SEV_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
 SEV_COLOUR = {"high": "#b42318", "medium": "#b54708", "low": "#475467", "info": "#98a2b3"}
 
 
+def _incident_groups(findings: list[dict]) -> list[list[dict]]:
+    """Findings sharing an incident_key (same triage call, see llm.triage) render as one entry."""
+    groups: dict[str, list[dict]] = {}
+    for f in findings:
+        groups.setdefault(f["incident_key"] or f"solo:{f['id']}", []).append(f)
+    return list(groups.values())
+
+
 def gather(conn: psycopg.Connection, tenant: Tenant, since: dt.datetime) -> dict:
     with conn.cursor() as cur:
         cur.execute("""SELECT * FROM findings WHERE tenant_id=%s AND updated_at >= %s
@@ -56,15 +64,21 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict) ->
     if summary:
         md += [f"**{summary['headline']}**", "", summary["summary"], ""]
     md += [f"Findings updated this run: {c['high']} high, {c['medium']} medium, {c['low']} low, {c['info']} info.", ""]
-    for f in data["findings"]:
-        if f["severity"] == "info":
-            continue
-        md.append(f"## [{f['severity'].upper()}] {f['title']}")
-        md.append(f"{local(f['first_ts'])} to {local(f['last_ts'])} ({tenant.display_tz}) - rule `{f['rule_id']}`"
-                  + (f", LLM verdict: {f['llm_verdict']}" if f["llm_verdict"] else ""))
-        if f["llm_explanation"]:
-            md += ["", f["llm_explanation"]]
-        for a in f["llm_actions"] or []:
+    visible = [f for f in data["findings"] if f["severity"] != "info"]
+    for group in _incident_groups(visible):
+        head = min(group, key=lambda f: SEV_ORDER[f["severity"]])
+        titles = list(dict.fromkeys(f["title"] for f in group))
+        rules = ", ".join(sorted({f["rule_id"] for f in group}))
+        span_start = min(f["first_ts"] for f in group)
+        span_end = max(f["last_ts"] for f in group)
+        md.append(f"## [{head['severity'].upper()}] {titles[0]}")
+        md.append(f"{local(span_start)} to {local(span_end)} ({tenant.display_tz}) - rule(s) `{rules}`"
+                  + (f", LLM verdict: {head['llm_verdict']}" if head["llm_verdict"] else ""))
+        if len(group) > 1:
+            md += [""] + [f"- {t}" for t in titles]
+        if head["llm_explanation"]:
+            md += ["", head["llm_explanation"]]
+        for a in head["llm_actions"] or []:
             md.append(f"- {a}")
         md.append("")
     info = [f for f in data["findings"] if f["severity"] == "info"]
@@ -76,17 +90,23 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict) ->
 
     # HTML
     rows = []
-    for f in data["findings"]:
-        if f["severity"] == "info":
-            continue
-        actions = "".join(f"<li>{html.escape(a)}</li>" for a in (f["llm_actions"] or []))
+    for group in _incident_groups(visible):
+        head = min(group, key=lambda f: SEV_ORDER[f["severity"]])
+        titles = list(dict.fromkeys(f["title"] for f in group))
+        rules = ", ".join(sorted({f["rule_id"] for f in group}))
+        span_start = min(f["first_ts"] for f in group)
+        span_end = max(f["last_ts"] for f in group)
+        actions = "".join(f"<li>{html.escape(a)}</li>" for a in (head["llm_actions"] or []))
+        members_html = ("<ul style='margin:4px 0 0 18px;padding:0'>"
+                         + "".join(f"<li>{html.escape(t)}</li>" for t in titles) + "</ul>") if len(group) > 1 else ""
         rows.append(f"""
 <tr><td style="padding:12px 0;border-top:1px solid #eaecf0">
-  <span style="color:#fff;background:{SEV_COLOUR[f['severity']]};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600">{f['severity'].upper()}</span>
-  <strong style="margin-left:6px">{html.escape(f['title'])}</strong>
-  <div style="color:#667085;font-size:12px;margin-top:4px">{local(f['first_ts'])} to {local(f['last_ts'])} &middot; {html.escape(f['rule_id'])}
-  {('&middot; verdict: ' + html.escape(f['llm_verdict'])) if f['llm_verdict'] else ''}</div>
-  {('<p style="margin:6px 0">' + html.escape(f['llm_explanation']) + '</p>') if f['llm_explanation'] else ''}
+  <span style="color:#fff;background:{SEV_COLOUR[head['severity']]};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600">{head['severity'].upper()}</span>
+  <strong style="margin-left:6px">{html.escape(titles[0])}</strong>
+  <div style="color:#667085;font-size:12px;margin-top:4px">{local(span_start)} to {local(span_end)} &middot; {html.escape(rules)}
+  {('&middot; verdict: ' + html.escape(head['llm_verdict'])) if head['llm_verdict'] else ''}</div>
+  {members_html}
+  {('<p style="margin:6px 0">' + html.escape(head['llm_explanation']) + '</p>') if head['llm_explanation'] else ''}
   {('<ul style="margin:4px 0 0 18px;padding:0">' + actions + '</ul>') if actions else ''}
 </td></tr>""")
     fresh = "".join(f"<li>{html.escape(r['application'])}: last file {r['generated']}, last event {local(r['last_event'])}</li>"

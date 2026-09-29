@@ -10,3 +10,4 @@ reports/*
 data/
 .venv/
 .claude/
+.DS_Store

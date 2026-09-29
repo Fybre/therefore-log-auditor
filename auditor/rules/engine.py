@@ -8,6 +8,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -115,6 +116,22 @@ def suppression_for(f: Finding, tenant: Tenant) -> str | None:
     return None
 
 
+# --- Incidents -------------------------------------------------------------------------
+
+def incident_key_for(f: Finding, tenant: Tenant) -> str | None:
+    """Findings that share a primary subject (first user, else first IP) and calendar day
+    (in the tenant's display timezone) are one incident: triaged together, shown together."""
+    subject = None
+    if f.subject_users and f.subject_users[0]:
+        subject = f.subject_users[0].lower()
+    elif f.subject_ips and f.subject_ips[0]:
+        subject = f.subject_ips[0]
+    if not subject:
+        return None
+    day = f.first_ts.astimezone(ZoneInfo(tenant.display_tz)).date()
+    return f"{subject}:{day}"
+
+
 # --- Persistence -----------------------------------------------------------------------
 
 def save_findings(conn: psycopg.Connection, tenant: Tenant, findings: list[Finding]) -> list[int]:
@@ -127,8 +144,9 @@ def save_findings(conn: psycopg.Connection, tenant: Tenant, findings: list[Findi
             severity = "info" if supp else f.severity
             cur.execute(
                 """INSERT INTO findings (tenant_id, rule_id, dedupe_key, title, rule_severity, severity,
-                       first_ts, last_ts, details, evidence_ids, suppressed_by)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                       first_ts, last_ts, details, evidence_ids, suppressed_by,
+                       subject_users, subject_ips, incident_key)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                    ON CONFLICT (tenant_id, rule_id, dedupe_key) DO UPDATE SET
                        title=EXCLUDED.title,
                        first_ts=LEAST(findings.first_ts, EXCLUDED.first_ts),
@@ -139,13 +157,16 @@ def save_findings(conn: psycopg.Connection, tenant: Tenant, findings: list[Findi
                                       AND findings.details = EXCLUDED.details
                                      THEN findings.severity ELSE EXCLUDED.severity END,
                        suppressed_by=EXCLUDED.suppressed_by,
+                       subject_users=EXCLUDED.subject_users, subject_ips=EXCLUDED.subject_ips,
+                       incident_key=EXCLUDED.incident_key,
                        llm_verdict=CASE WHEN findings.details = EXCLUDED.details
                                         THEN findings.llm_verdict ELSE NULL END,
                        updated_at=CASE WHEN findings.details = EXCLUDED.details
                                        THEN findings.updated_at ELSE now() END
                    RETURNING id, (xmax = 0) AS inserted, llm_verdict""",
                 (tenant.id, f.rule_id, f.dedupe_key, f.title, f.severity, severity, f.first_ts,
-                 f.last_ts, Jsonb(f.details), f.evidence_ids[:200], supp),
+                 f.last_ts, Jsonb(f.details), f.evidence_ids[:200], supp,
+                 f.subject_users, f.subject_ips, incident_key_for(f, tenant)),
             )
             row = cur.fetchone()
             if row["llm_verdict"] is None:
