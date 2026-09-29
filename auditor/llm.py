@@ -166,14 +166,17 @@ class Redactor:
         if not (self.enabled and s):
             return s
         for real, alias in sorted(self.forward.items(), key=lambda kv: -len(kv[0])):
-            s = re.sub(rf"(?<![\w.@-]){re.escape(real)}(?![\w@-])", alias, s, flags=re.I)
+            # A lambda replacement is used verbatim - a string replacement would instead try to
+            # interpret backslashes in `alias`/`real` as regex group refs (e.g. a host like
+            # "AD\aueapp00", a real value Therefore uses, would break re.sub as a literal repl).
+            s = re.sub(rf"(?<![\w.@-]){re.escape(real)}(?![\w@-])", lambda m: alias, s, flags=re.I)
         return s
 
     def restore(self, s: str) -> str:
         if not self.enabled:
             return s
         for real, alias in sorted(self.forward.items(), key=lambda kv: -len(kv[1])):
-            s = re.sub(rf"\b{re.escape(alias)}\b", real, s)
+            s = re.sub(rf"\b{re.escape(alias)}\b", lambda m: real, s)
         return s
 
 
