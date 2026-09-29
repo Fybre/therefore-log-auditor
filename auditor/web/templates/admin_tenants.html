@@ -4,14 +4,22 @@
 <h1>Tenants / servers</h1>
 <p><a class="row-link" href="/admin/tenants/new">+ Add tenant</a></p>
 <table>
-  <tr><th>ID</th><th>Base URL</th><th>Schedule</th><th>LLM</th><th>Enabled</th><th></th></tr>
+  <tr><th>ID</th><th>Base URL</th><th>Schedule</th><th>LLM</th><th>Enabled</th><th>Last run</th><th></th></tr>
   {% for t in tenants %}
+  {% set h = health.get(t.id) %}
   <tr>
     <td><a class="row-link" href="/admin/tenants/{{ t.id }}/edit">{{ t.id }}</a></td>
     <td class="muted">{{ t.base_url }}</td>
     <td class="muted">{{ t.schedule.daily | humanize_schedule }} ({{ t.display_tz }})</td>
     <td class="muted">{{ "on" if t.llm.enabled else "off" }}</td>
     <td>{% if t.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}</td>
+    <td class="muted" style="font-size:12.5px">
+      {% if not h %}never run
+      {% elif h.error %}<span style="color:var(--high)">failed {{ h.started_at | local_time(t.display_tz) }}</span>
+      {% elif not h.finished_at %}<span style="color:var(--medium)">running since {{ h.started_at | local_time(t.display_tz) }}</span>
+      {% else %}{{ h.finished_at | local_time(t.display_tz) }}
+      {% endif %}
+    </td>
     <td style="text-align:right;white-space:nowrap">
       <a class="row-link muted" href="/admin/tenants/{{ t.id }}/rules">Rules</a>
       <form method="post" action="/admin/tenants/{{ t.id }}/run" style="display:inline;margin-left:10px">
@@ -20,7 +28,10 @@
     </td>
   </tr>
   {% else %}
-  <tr><td colspan="6" class="muted">No tenants configured yet.</td></tr>
+  <tr><td colspan="7" class="muted">No tenants configured yet.</td></tr>
   {% endfor %}
 </table>
+<p class="muted" style="font-size:12px">A scheduler health check runs every 30 minutes and emails
+  if a tenant's runs stop happening, start failing, or get stuck - see the alert recipients on the
+  <a class="row-link" href="/admin/smtp">SMTP page</a>.</p>
 {% endblock %}

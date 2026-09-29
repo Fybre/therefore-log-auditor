@@ -41,6 +41,12 @@
   <p class="muted" style="margin:-4px 0 0;font-size:12px">Used to add a "View in dashboard" link
     to digest emails, and to link each finding mentioned in an email straight to it. Leave blank
     to omit the link (emails still work, they just won't link anywhere).</p>
+  <label>Scheduler health alert recipients (one per line)</label>
+  <textarea name="alert_email_to" rows="2">{{ (general.alert_email_to | join('\n')) if general and general.alert_email_to else '' }}</textarea>
+  <p class="muted" style="margin:-4px 0 0;font-size:12px">Emailed if a tenant's own scheduled
+    runs stop happening (crashed, failing repeatedly, or just gone stale) - checked every 30
+    minutes. This is about the auditor's own health, not about what it finds in a tenant's logs.
+    Leave blank to fall back to that tenant's own digest recipients.</p>
   <button type="submit" style="align-self:flex-start;padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
 </form>
 {% endblock %}

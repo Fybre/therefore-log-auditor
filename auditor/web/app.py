@@ -359,7 +359,14 @@ def register_routes(app: FastAPI) -> None:
     @app.get("/admin/tenants")
     def admin_tenants(request: Request, conn=Depends(db_conn)):
         tenants = cfg.load_tenants(conn, include_disabled=True)
-        return render(request, "admin_tenants.html", {"tenants": tenants})
+        health = {}
+        with conn.cursor() as cur:
+            for t in tenants:
+                cur.execute("""SELECT started_at, finished_at, error FROM runs
+                               WHERE tenant_id=%s AND kind <> 'backfill'
+                               ORDER BY started_at DESC LIMIT 1""", (t.id,))
+                health[t.id] = cur.fetchone()
+        return render(request, "admin_tenants.html", {"tenants": tenants, "health": health})
 
     @app.get("/admin/tenants/new")
     def admin_tenant_new_form(request: Request):
@@ -566,8 +573,9 @@ def register_routes(app: FastAPI) -> None:
         return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True, "general": cfg.load_general(conn)})
 
     @app.post("/admin/general")
-    def admin_general_save(request: Request, conn=Depends(db_conn), dashboard_url: str = Form("")):
-        cfg.save_general(conn, dashboard_url=dashboard_url)
+    def admin_general_save(request: Request, conn=Depends(db_conn), dashboard_url: str = Form(""),
+                            alert_email_to: str = Form("")):
+        cfg.save_general(conn, dashboard_url=dashboard_url, alert_email_to=_split_emails(alert_email_to))
         smtp = cfg.load_smtp(conn) or {"host": "", "port": 587, "user": "", "from": "", "starttls": True}
         return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True, "general": cfg.load_general(conn)})
 

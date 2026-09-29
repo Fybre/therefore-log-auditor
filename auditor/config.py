@@ -72,6 +72,7 @@ class Settings:
     smtp: dict[str, Any]
     reports_dir: Path
     dashboard_url: str = ""   # e.g. https://audit.example.com - used to link back from digest emails
+    alert_email_to: list[str] = field(default_factory=list)   # scheduler self-health alerts, see health.py
 
     def tenant(self, tenant_id: str) -> Tenant:
         for t in self.tenants:
@@ -109,7 +110,9 @@ def refresh_from_db(settings: Settings, conn: psycopg.Connection) -> None:
     place, so callers that already handed the object to a scheduler/pipeline see the update."""
     settings.tenants = load_tenants(conn)
     settings.smtp = load_smtp(conn) or settings.smtp
-    settings.dashboard_url = load_general(conn).get("dashboard_url", "") or settings.dashboard_url
+    general = load_general(conn)
+    settings.dashboard_url = general.get("dashboard_url", "") or settings.dashboard_url
+    settings.alert_email_to = general.get("alert_email_to") or settings.alert_email_to
 
 
 # --- Tenants -----------------------------------------------------------------------------
@@ -270,11 +273,12 @@ def load_general(conn: psycopg.Connection) -> dict:
     with conn.cursor() as cur:
         cur.execute("SELECT value FROM app_settings WHERE key='general'")
         row = cur.fetchone()
-    return dict(row["value"]) if row else {"dashboard_url": ""}
+    return dict(row["value"]) if row else {"dashboard_url": "", "alert_email_to": []}
 
 
-def save_general(conn: psycopg.Connection, *, dashboard_url: str) -> None:
-    value = {"dashboard_url": dashboard_url.strip().rstrip("/")}
+def save_general(conn: psycopg.Connection, *, dashboard_url: str, alert_email_to: list[str] | None = None) -> None:
+    value = {"dashboard_url": dashboard_url.strip().rstrip("/"),
+             "alert_email_to": alert_email_to or []}
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO app_settings (key, value) VALUES ('general', %s)

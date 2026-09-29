@@ -14,10 +14,12 @@ from apscheduler.triggers.cron import CronTrigger
 from . import config
 from .config import Settings, Tenant
 from .db import connect, migrate
+from .health import run_health_check
 from .pipeline import run_tenant
 
 log = logging.getLogger(__name__)
 RECONCILE_MINUTES = 5
+HEALTH_CHECK_MINUTES = 30
 
 
 def _has_todays_log(settings: Settings, tenant: Tenant) -> bool:
@@ -71,5 +73,8 @@ def serve(settings: Settings) -> None:
     _reconcile(sched, settings)
     sched.add_job(_reconcile, "interval", args=[sched, settings], minutes=RECONCILE_MINUTES,
                   id="reconcile", coalesce=True, max_instances=1)
-    log.info("Scheduler started; re-checking tenants every %s minutes", RECONCILE_MINUTES)
+    sched.add_job(run_health_check, "interval", args=[settings], minutes=HEALTH_CHECK_MINUTES,
+                  id="health-check", coalesce=True, max_instances=1)
+    log.info("Scheduler started; re-checking tenants every %s minutes, health check every %s minutes",
+             RECONCILE_MINUTES, HEALTH_CHECK_MINUTES)
     sched.start()
