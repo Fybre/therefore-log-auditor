@@ -1,4 +1,8 @@
-"""Configuration: tenants from YAML, secrets and service settings from the environment."""
+"""Configuration: tenants/servers, per-tenant rule toggles and SMTP delivery live in the database
+(tables `tenants`, `tenant_rule_settings`, `app_settings`) and are managed from the dashboard -
+see auditor/web/app.py's /admin/* routes. Only what has to exist before the database does -
+DATABASE_URL, the LLM connection, AUDITOR_ENC_KEY - stays in the environment/.env. The rule
+*defaults* (thresholds) still come from config/rules.yaml; tenants only override them."""
 from __future__ import annotations
 
 import os
@@ -7,7 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import yaml
+from psycopg.types.json import Jsonb
+
+from . import crypto
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,14 +34,13 @@ def load_dotenv(path: Path | None = None) -> None:
         os.environ.setdefault(key.strip(), value)
 
 
-def _env_key(tenant_id: str) -> str:
-    return re.sub(r"[^A-Za-z0-9]", "_", tenant_id).upper()
-
-
 @dataclass
 class Tenant:
     id: str
     base_url: str
+    username: str = ""
+    password: str = ""
+    tenant_name_override: str | None = None
     log_category_no: int = 1
     log_tz: str = "UTC"
     display_tz: str = "UTC"
@@ -42,20 +49,12 @@ class Tenant:
     digest: dict[str, Any] = field(default_factory=dict)
     known: dict[str, Any] = field(default_factory=dict)
     rules: dict[str, Any] = field(default_factory=dict)   # per-tenant rule overrides
-
-    @property
-    def username(self) -> str:
-        return os.environ.get(f"THEREFORE_{_env_key(self.id)}_USERNAME", "")
-
-    @property
-    def password(self) -> str:
-        return os.environ.get(f"THEREFORE_{_env_key(self.id)}_PASSWORD", "")
+    enabled: bool = True
 
     @property
     def tenant_name(self) -> str | None:
-        explicit = os.environ.get(f"THEREFORE_{_env_key(self.id)}_TENANTNAME")
-        if explicit:
-            return explicit
+        if self.tenant_name_override:
+            return self.tenant_name_override
         host = re.sub(r"^https?://", "", self.base_url).split("/")[0].lower()
         if host.endswith(".thereforeonline.com"):
             return host.split(".")[0]
@@ -86,26 +85,175 @@ class Settings:
 
 
 def load_settings() -> Settings:
+    """Env/file-only settings. Does NOT touch the tenants/app_settings tables (they may not
+    exist yet, e.g. before the first migration) - call refresh_from_db() once a connection is
+    available."""
     load_dotenv()
-    tenants_path = Path(os.environ.get("AUDITOR_TENANTS_FILE", ROOT / "config" / "tenants.yaml"))
     rules_path = Path(os.environ.get("AUDITOR_RULES_FILE", ROOT / "config" / "rules.yaml"))
-    tenants_raw = yaml.safe_load(tenants_path.read_text()) if tenants_path.exists() else {}
     rules_raw = yaml.safe_load(rules_path.read_text()) if rules_path.exists() else {}
-    tenants = [Tenant(**t) for t in (tenants_raw or {}).get("tenants", [])]
     return Settings(
         database_url=os.environ.get("DATABASE_URL", "postgresql://auditor:auditor@localhost:5432/auditor"),
-        tenants=tenants,
+        tenants=[],
         rules=(rules_raw or {}).get("rules", {}),
         llm_base_url=os.environ.get("LLM_BASE_URL", "").rstrip("/"),
         llm_api_key=os.environ.get("LLM_API_KEY", ""),
         llm_model=os.environ.get("LLM_MODEL", ""),
-        smtp={
-            "host": os.environ.get("SMTP_HOST", ""),
-            "port": int(os.environ.get("SMTP_PORT", "587") or 587),
-            "user": os.environ.get("SMTP_USER", ""),
-            "password": os.environ.get("SMTP_PASSWORD", ""),
-            "from": os.environ.get("SMTP_FROM", ""),
-            "starttls": os.environ.get("SMTP_STARTTLS", "true").lower() != "false",
-        },
+        smtp={"host": "", "port": 587, "user": "", "password": "", "from": "", "starttls": True},
         reports_dir=Path(os.environ.get("AUDITOR_REPORTS_DIR", ROOT / "reports")),
     )
+
+
+def refresh_from_db(settings: Settings, conn: psycopg.Connection) -> None:
+    """Reload tenants + SMTP config from the database into an existing Settings in place, so
+    callers that already handed the object to a scheduler/pipeline see the update."""
+    settings.tenants = load_tenants(conn)
+    settings.smtp = load_smtp(conn) or settings.smtp
+
+
+# --- Tenants -----------------------------------------------------------------------------
+
+def _row_to_tenant(conn: psycopg.Connection, r: dict) -> Tenant:
+    with conn.cursor() as cur:
+        cur.execute("SELECT rule_id, enabled, config FROM tenant_rule_settings WHERE tenant_id=%s",
+                    (r["id"],))
+        rules = {}
+        for row in cur.fetchall():
+            override: dict[str, Any] = dict(row["config"] or {})
+            if row["enabled"] is not None:
+                override["enabled"] = row["enabled"]
+            if override:
+                rules[row["rule_id"]] = override
+    return Tenant(
+        id=r["id"], base_url=r["base_url"],
+        username=r["therefore_username"],
+        password=crypto.decrypt(r["therefore_password_enc"]),
+        tenant_name_override=r["tenant_name_override"],
+        log_category_no=r["log_category_no"], log_tz=r["log_tz"], display_tz=r["display_tz"],
+        schedule={"daily": r["schedule_cron"]},
+        llm={"enabled": r["llm_enabled"], "redact": r["llm_redact"]},
+        digest={"email_to": list(r["digest_email_to"] or [])},
+        known=r["known"] or {},
+        rules=rules,
+        enabled=r["enabled"],
+    )
+
+
+def load_tenants(conn: psycopg.Connection, include_disabled: bool = False) -> list[Tenant]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM tenants" + ("" if include_disabled else " WHERE enabled")
+                     + " ORDER BY id")
+        rows = cur.fetchall()
+    return [_row_to_tenant(conn, r) for r in rows]
+
+
+def get_tenant_row(conn: psycopg.Connection, tenant_id: str) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT * FROM tenants WHERE id=%s", (tenant_id,))
+        return cur.fetchone()
+
+
+def get_tenant(conn: psycopg.Connection, tenant_id: str) -> Tenant | None:
+    row = get_tenant_row(conn, tenant_id)
+    return _row_to_tenant(conn, row) if row else None
+
+
+def save_tenant(conn: psycopg.Connection, *, id: str, base_url: str, username: str,
+                 password: str | None, tenant_name_override: str | None, log_category_no: int,
+                 log_tz: str, display_tz: str, schedule_cron: str, llm_enabled: bool,
+                 llm_redact: bool, digest_email_to: list[str], known: dict, enabled: bool) -> None:
+    """Create or update a tenant. `password=None` keeps the existing encrypted password
+    (used when editing a tenant without re-entering its Therefore login)."""
+    with conn.cursor() as cur:
+        if password is None:
+            cur.execute(
+                """UPDATE tenants SET base_url=%s, therefore_username=%s, tenant_name_override=%s,
+                       log_category_no=%s, log_tz=%s, display_tz=%s, schedule_cron=%s,
+                       llm_enabled=%s, llm_redact=%s, digest_email_to=%s, known=%s, enabled=%s,
+                       updated_at=now()
+                   WHERE id=%s""",
+                (base_url, username, tenant_name_override, log_category_no, log_tz, display_tz,
+                 schedule_cron, llm_enabled, llm_redact, digest_email_to, Jsonb(known), enabled, id))
+            if cur.rowcount == 0:
+                raise KeyError(f"Unknown tenant '{id}' (password required to create a new tenant)")
+        else:
+            password_enc = crypto.encrypt(password)
+            cur.execute(
+                """INSERT INTO tenants (id, base_url, therefore_username, therefore_password_enc,
+                       tenant_name_override, log_category_no, log_tz, display_tz, schedule_cron,
+                       llm_enabled, llm_redact, digest_email_to, known, enabled)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                   ON CONFLICT (id) DO UPDATE SET
+                       base_url=EXCLUDED.base_url, therefore_username=EXCLUDED.therefore_username,
+                       therefore_password_enc=EXCLUDED.therefore_password_enc,
+                       tenant_name_override=EXCLUDED.tenant_name_override,
+                       log_category_no=EXCLUDED.log_category_no, log_tz=EXCLUDED.log_tz,
+                       display_tz=EXCLUDED.display_tz, schedule_cron=EXCLUDED.schedule_cron,
+                       llm_enabled=EXCLUDED.llm_enabled, llm_redact=EXCLUDED.llm_redact,
+                       digest_email_to=EXCLUDED.digest_email_to, known=EXCLUDED.known,
+                       enabled=EXCLUDED.enabled, updated_at=now()""",
+                (id, base_url, username, password_enc, tenant_name_override, log_category_no,
+                 log_tz, display_tz, schedule_cron, llm_enabled, llm_redact, digest_email_to,
+                 Jsonb(known), enabled))
+    conn.commit()
+
+
+def delete_tenant(conn: psycopg.Connection, tenant_id: str) -> None:
+    with conn.cursor() as cur:
+        cur.execute("DELETE FROM tenants WHERE id=%s", (tenant_id,))
+    conn.commit()
+
+
+# --- Per-tenant rule settings --------------------------------------------------------------
+
+def rule_settings_for(conn: psycopg.Connection, tenant_id: str) -> dict[str, dict]:
+    with conn.cursor() as cur:
+        cur.execute("SELECT rule_id, enabled, config FROM tenant_rule_settings WHERE tenant_id=%s",
+                    (tenant_id,))
+        return {r["rule_id"]: {"enabled": r["enabled"], "config": r["config"] or {}}
+                for r in cur.fetchall()}
+
+
+def set_rule_setting(conn: psycopg.Connection, tenant_id: str, rule_id: str,
+                      enabled: bool | None, config: dict) -> None:
+    """enabled=None and an empty config means 'inherit the global default' - remove any
+    existing override row rather than storing a no-op one."""
+    with conn.cursor() as cur:
+        if enabled is None and not config:
+            cur.execute("DELETE FROM tenant_rule_settings WHERE tenant_id=%s AND rule_id=%s",
+                        (tenant_id, rule_id))
+        else:
+            cur.execute(
+                """INSERT INTO tenant_rule_settings (tenant_id, rule_id, enabled, config)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT (tenant_id, rule_id) DO UPDATE SET enabled=EXCLUDED.enabled,
+                       config=EXCLUDED.config""",
+                (tenant_id, rule_id, enabled, Jsonb(config)))
+    conn.commit()
+
+
+# --- App-wide settings (SMTP) ---------------------------------------------------------------
+
+def load_smtp(conn: psycopg.Connection) -> dict | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT value FROM app_settings WHERE key='smtp'")
+        row = cur.fetchone()
+    if not row:
+        return None
+    smtp = dict(row["value"])
+    smtp["password"] = crypto.decrypt(smtp.get("password_enc", "")) if smtp.get("password_enc") else ""
+    return smtp
+
+
+def save_smtp(conn: psycopg.Connection, *, host: str, port: int, user: str,
+              password: str | None, from_addr: str, starttls: bool) -> None:
+    existing = load_smtp(conn) or {}
+    password_enc = crypto.encrypt(password) if password is not None else existing.get("password_enc", "")
+    if password is not None and not password:
+        password_enc = ""
+    value = {"host": host, "port": port, "user": user, "password_enc": password_enc,
+             "from": from_addr, "starttls": starttls}
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO app_settings (key, value) VALUES ('smtp', %s)
+               ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""", (Jsonb(value),))
+    conn.commit()

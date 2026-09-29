@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ tenant_id }} rule settings - Therefore Log Auditor{% endblock %}
+{% block content %}
+<p><a class="row-link muted" href="/admin/tenants">&larr; tenants</a></p>
+<h1>{{ tenant_id }} &middot; which events flag alerts</h1>
+<p class="muted">Per-rule override for this tenant. "Inherit" uses the global default from
+  config/rules.yaml. Advanced config is an optional JSON object of threshold overrides
+  (e.g. <code>{"min_events": 500}</code>) - leave blank to use the defaults.</p>
+<form method="post" action="/admin/tenants/{{ tenant_id }}/rules">
+<table>
+  <tr><th>Rule</th><th>Global default</th><th>This tenant</th><th>Advanced config (JSON)</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td><code>{{ r.rule_id }}</code></td>
+    <td class="muted">{{ "enabled" if r.global_default else "disabled" }}</td>
+    <td>
+      <select name="enabled__{{ r.rule_id }}">
+        <option value="inherit" {% if r.enabled is none %}selected{% endif %}>Inherit</option>
+        <option value="on" {% if r.enabled == true %}selected{% endif %}>Enabled</option>
+        <option value="off" {% if r.enabled == false %}selected{% endif %}>Disabled</option>
+      </select>
+    </td>
+    <td><input type="text" name="config__{{ r.rule_id }}" style="width:100%"
+               value="{{ (r.config | tojson) if r.config else '' }}"></td>
+  </tr>
+  {% endfor %}
+</table>
+<button type="submit" style="margin-top:12px;padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+</form>
+{% endblock %}

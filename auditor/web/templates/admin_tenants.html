@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Tenants admin - Therefore Log Auditor{% endblock %}
+{% block content %}
+<h1>Tenants / servers</h1>
+<p><a class="row-link" href="/admin/tenants/new">+ Add tenant</a></p>
+<table>
+  <tr><th>ID</th><th>Base URL</th><th>Schedule</th><th>LLM</th><th>Enabled</th><th></th></tr>
+  {% for t in tenants %}
+  <tr>
+    <td>{{ t.id }}</td>
+    <td class="muted">{{ t.base_url }}</td>
+    <td class="muted">{{ t.schedule.daily }} ({{ t.display_tz }})</td>
+    <td class="muted">{{ "on" if t.llm.enabled else "off" }}</td>
+    <td>{% if t.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}</td>
+    <td>
+      <a class="row-link" href="/admin/tenants/{{ t.id }}/edit">Edit</a> &middot;
+      <a class="row-link" href="/admin/tenants/{{ t.id }}/rules">Rules</a> &middot;
+      <a class="row-link" href="/t/{{ t.id }}/findings">Findings</a>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No tenants configured yet.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}SMTP - Therefore Log Auditor{% endblock %}
+{% block content %}
+<h1>SMTP delivery</h1>
+<p class="muted">Used to email the daily digest to each tenant's <code>digest_email_to</code>
+  list. Leave the host blank to only write reports to disk (no email sent).</p>
+{% if saved %}<p style="color:#067647">Saved.</p>{% endif %}
+<form class="card" method="post" action="/admin/smtp" style="display:flex;flex-direction:column;gap:10px;max-width:420px">
+  <label>SMTP host</label>
+  <input type="text" name="host" value="{{ smtp.host }}">
+  <label>Port</label>
+  <input type="number" name="port" value="{{ smtp.port }}">
+  <label>Username</label>
+  <input type="text" name="user" value="{{ smtp.user }}">
+  <label>Password (leave blank to keep the current one)</label>
+  <input type="password" name="password">
+  <label>From address</label>
+  <input type="text" name="from_addr" value="{{ smtp['from'] }}">
+  <label><input type="checkbox" name="starttls" value="true" {% if smtp.starttls %}checked{% endif %}> Use STARTTLS</label>
+  <button type="submit" style="align-self:flex-start;padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+</form>
+{% endblock %}

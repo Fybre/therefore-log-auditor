@@ -1,6 +1,7 @@
-"""Dashboard: findings queue, evidence view, known-activity display, verdict feedback.
-Read-mostly over the same Postgres the pipeline writes to - no write path here touches
-the Therefore API. See auth.py for how login is meant to be swapped for Entra ID later."""
+"""Dashboard: findings queue, evidence view, known-activity display, verdict feedback, and
+/admin/* config management (tenants/servers, per-tenant rule toggles, SMTP delivery, local
+accounts) - all of which used to live in config/tenants.yaml and .env. See auth.py for the
+local-account login model."""
 from __future__ import annotations
 
 import datetime as dt
@@ -12,6 +13,8 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .. import config as cfg
+from .. import passwords
 from ..config import Settings, load_settings
 from ..db import connect, migrate
 from . import auth
@@ -32,6 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     with connect(settings.database_url) as conn:
         migrate(conn)
+        auth.bootstrap_first_admin(conn)
     app = FastAPI(title="Therefore Log Auditor")
     app.state.settings = settings
 
@@ -58,26 +62,27 @@ def db_conn(request: Request):
         conn.close()
 
 
-def get_tenant(request: Request, tenant_id: str):
-    return request.app.state.settings.tenant(tenant_id)
-
-
 def register_routes(app: FastAPI) -> None:
     templates: Jinja2Templates = app.state.templates
 
+    def render(request, name, ctx, status_code: int = 200):
+        return templates.TemplateResponse(request, name, {"user": auth.current_user(request), **ctx},
+                                          status_code=status_code)
+
+    # --- Auth --------------------------------------------------------------------------
+
     @app.get("/login")
     def login_form(request: Request, next: str = "/"):
-        return templates.TemplateResponse(request, "login.html", {"next": next, "error": None})
+        return render(request, "login.html", {"next": next, "error": None})
 
     @app.post("/login")
-    def login_submit(request: Request, username: str = Form(...), password: str = Form(...),
-                      next: str = Form("/")):
-        user = auth.authenticate(username, password)
+    def login_submit(request: Request, conn=Depends(db_conn), username: str = Form(...),
+                      password: str = Form(...), next: str = Form("/")):
+        user = auth.authenticate(conn, username, password)
         if not user:
-            return templates.TemplateResponse(
-                request, "login.html", {"next": next, "error": "Invalid username or password"},
-                status_code=401)
-        request.session["user"] = user.username
+            return render(request, "login.html", {"next": next, "error": "Invalid username or password"},
+                          status_code=401)
+        request.session["user"] = {"id": user.id, "username": user.username}
         return RedirectResponse(url=next or "/", status_code=303)
 
     @app.post("/logout")
@@ -85,12 +90,13 @@ def register_routes(app: FastAPI) -> None:
         request.session.clear()
         return RedirectResponse(url="/login", status_code=303)
 
+    # --- Findings ------------------------------------------------------------------------
+
     @app.get("/")
     def tenants_index(request: Request, conn=Depends(db_conn)):
-        settings: Settings = request.app.state.settings
         rows = []
         with conn.cursor() as cur:
-            for t in settings.tenants:
+            for t in cfg.load_tenants(conn, include_disabled=True):
                 cur.execute(
                     """SELECT count(*) FILTER (WHERE severity='high' AND status='open') AS high,
                               count(*) FILTER (WHERE severity='medium' AND status='open') AS medium,
@@ -98,13 +104,12 @@ def register_routes(app: FastAPI) -> None:
                               max(last_ts) AS last_finding
                        FROM findings WHERE tenant_id=%s""", (t.id,))
                 rows.append({"tenant": t, **cur.fetchone()})
-        return templates.TemplateResponse(request, "tenants.html", {"rows": rows,
-                                          "user": auth.current_user(request)})
+        return render(request, "tenants.html", {"rows": rows})
 
     @app.get("/t/{tenant_id}/findings")
     def findings_list(request: Request, tenant_id: str, conn=Depends(db_conn),
                        min_severity: str = "low", status: str = "", days: int = 30):
-        tenant = get_tenant(request, tenant_id)
+        tenant = cfg.get_tenant(conn, tenant_id)
         allowed = list(SEV_ORDER)[:list(SEV_ORDER).index(min_severity) + 1] if min_severity in SEV_ORDER else list(SEV_ORDER)
         since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         with conn.cursor() as cur:
@@ -120,20 +125,18 @@ def register_routes(app: FastAPI) -> None:
                    LIMIT 300""",
                 (tenant_id, allowed, since, status, status))
             findings = cur.fetchall()
-        return templates.TemplateResponse(request, "findings.html", {
+        return render(request, "findings.html", {
             "tenant": tenant, "findings": findings, "min_severity": min_severity,
-            "status": status, "days": days, "statuses": REVIEW_STATUSES,
-            "user": auth.current_user(request)})
+            "status": status, "days": days, "statuses": REVIEW_STATUSES})
 
     @app.get("/t/{tenant_id}/findings/{finding_id}")
     def finding_detail(request: Request, tenant_id: str, finding_id: int, conn=Depends(db_conn)):
-        tenant = get_tenant(request, tenant_id)
+        tenant = cfg.get_tenant(conn, tenant_id)
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM findings WHERE tenant_id=%s AND id=%s", (tenant_id, finding_id))
             finding = cur.fetchone()
             if not finding:
-                return templates.TemplateResponse(request, "not_found.html", {"tenant": tenant},
-                                                   status_code=404)
+                return render(request, "not_found.html", {"tenant": tenant}, status_code=404)
             evidence = []
             if finding["evidence_ids"]:
                 cur.execute(
@@ -149,9 +152,9 @@ def register_routes(app: FastAPI) -> None:
                        WHERE tenant_id=%s AND incident_key=%s AND id <> %s""",
                     (tenant_id, finding["incident_key"], finding_id))
                 incident = cur.fetchall()
-        return templates.TemplateResponse(request, "finding_detail.html", {
+        return render(request, "finding_detail.html", {
             "tenant": tenant, "f": finding, "evidence": evidence, "incident": incident,
-            "statuses": REVIEW_STATUSES, "user": auth.current_user(request)})
+            "statuses": REVIEW_STATUSES})
 
     @app.post("/t/{tenant_id}/findings/{finding_id}/review")
     def review_finding(request: Request, tenant_id: str, finding_id: int, conn=Depends(db_conn),
@@ -167,7 +170,160 @@ def register_routes(app: FastAPI) -> None:
         return RedirectResponse(url=f"/t/{tenant_id}/findings/{finding_id}", status_code=303)
 
     @app.get("/t/{tenant_id}/known")
-    def known_activity(request: Request, tenant_id: str):
-        tenant = get_tenant(request, tenant_id)
-        return templates.TemplateResponse(request, "known.html", {
-            "tenant": tenant, "known": tenant.known or {}, "user": auth.current_user(request)})
+    def known_activity(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        tenant = cfg.get_tenant(conn, tenant_id)
+        return render(request, "known.html", {"tenant": tenant, "known": tenant.known or {}})
+
+    # --- Admin: tenants/servers ------------------------------------------------------------
+
+    @app.get("/admin/tenants")
+    def admin_tenants(request: Request, conn=Depends(db_conn)):
+        tenants = cfg.load_tenants(conn, include_disabled=True)
+        return render(request, "admin_tenants.html", {"tenants": tenants})
+
+    @app.get("/admin/tenants/new")
+    def admin_tenant_new_form(request: Request):
+        return render(request, "admin_tenant_form.html", {"t": None, "row": None, "error": None})
+
+    @app.get("/admin/tenants/{tenant_id}/edit")
+    def admin_tenant_edit_form(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        row = cfg.get_tenant_row(conn, tenant_id)
+        if not row:
+            return render(request, "not_found.html", {"tenant": None}, status_code=404)
+        return render(request, "admin_tenant_form.html", {"t": tenant_id, "row": row, "error": None})
+
+    @app.post("/admin/tenants/new")
+    def admin_tenant_create(request: Request, conn=Depends(db_conn),
+                             id: str = Form(...), base_url: str = Form(...),
+                             username: str = Form(""), password: str = Form(""),
+                             tenant_name_override: str = Form(""), log_category_no: int = Form(1),
+                             log_tz: str = Form("UTC"), display_tz: str = Form("UTC"),
+                             schedule_cron: str = Form("30 3 * * *"),
+                             llm_enabled: bool = Form(False), llm_redact: bool = Form(False),
+                             digest_email_to: str = Form(""), enabled: bool = Form(False)):
+        if cfg.get_tenant_row(conn, id):
+            return render(request, "admin_tenant_form.html",
+                          {"t": None, "row": None, "error": f"Tenant '{id}' already exists"}, status_code=400)
+        cfg.save_tenant(conn, id=id, base_url=base_url, username=username, password=password,
+                        tenant_name_override=tenant_name_override or None,
+                        log_category_no=log_category_no, log_tz=log_tz, display_tz=display_tz,
+                        schedule_cron=schedule_cron, llm_enabled=llm_enabled, llm_redact=llm_redact,
+                        digest_email_to=_split_emails(digest_email_to), known={}, enabled=enabled)
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    @app.post("/admin/tenants/{tenant_id}/edit")
+    def admin_tenant_update(request: Request, tenant_id: str, conn=Depends(db_conn),
+                             base_url: str = Form(...), username: str = Form(""),
+                             password: str = Form(""), tenant_name_override: str = Form(""),
+                             log_category_no: int = Form(1), log_tz: str = Form("UTC"),
+                             display_tz: str = Form("UTC"), schedule_cron: str = Form("30 3 * * *"),
+                             llm_enabled: bool = Form(False), llm_redact: bool = Form(False),
+                             digest_email_to: str = Form(""), enabled: bool = Form(False)):
+        existing = cfg.get_tenant(conn, tenant_id)
+        cfg.save_tenant(conn, id=tenant_id, base_url=base_url, username=username,
+                        password=(password or None), tenant_name_override=tenant_name_override or None,
+                        log_category_no=log_category_no, log_tz=log_tz, display_tz=display_tz,
+                        schedule_cron=schedule_cron, llm_enabled=llm_enabled, llm_redact=llm_redact,
+                        digest_email_to=_split_emails(digest_email_to),
+                        known=(existing.known if existing else {}), enabled=enabled)
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    @app.post("/admin/tenants/{tenant_id}/delete")
+    def admin_tenant_delete(request: Request, tenant_id: str, conn=Depends(db_conn),
+                             confirm: str = Form("")):
+        if confirm == tenant_id:
+            cfg.delete_tenant(conn, tenant_id)
+        return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    @app.get("/admin/tenants/{tenant_id}/rules")
+    def admin_tenant_rules(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        from ..rules import builtin  # noqa: F401  (registers rules)
+        from ..rules.engine import RULES
+        settings: Settings = request.app.state.settings
+        overrides = cfg.rule_settings_for(conn, tenant_id)
+        rows = []
+        for rule_id in sorted(RULES):
+            global_default = bool(settings.rules.get(rule_id, {}).get("enabled", True))
+            ov = overrides.get(rule_id, {})
+            rows.append({"rule_id": rule_id, "global_default": global_default,
+                        "enabled": ov.get("enabled"), "config": ov.get("config") or {}})
+        return render(request, "admin_tenant_rules.html", {"tenant_id": tenant_id, "rows": rows})
+
+    @app.post("/admin/tenants/{tenant_id}/rules")
+    async def admin_tenant_rules_save(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        from ..rules import builtin  # noqa: F401
+        from ..rules.engine import RULES
+        form = await request.form()
+        for rule_id in RULES:
+            choice = form.get(f"enabled__{rule_id}", "inherit")
+            enabled = {"inherit": None, "on": True, "off": False}.get(choice)
+            raw_config = (form.get(f"config__{rule_id}", "") or "").strip()
+            config_obj = {}
+            if raw_config:
+                import json
+                try:
+                    config_obj = json.loads(raw_config)
+                except ValueError:
+                    continue   # ignore unparsable JSON rather than 500 the whole save
+            cfg.set_rule_setting(conn, tenant_id, rule_id, enabled, config_obj)
+        return RedirectResponse(url=f"/admin/tenants/{tenant_id}/rules", status_code=303)
+
+    # --- Admin: SMTP -------------------------------------------------------------------
+
+    @app.get("/admin/smtp")
+    def admin_smtp_form(request: Request, conn=Depends(db_conn)):
+        smtp = cfg.load_smtp(conn) or {"host": "", "port": 587, "user": "", "from": "", "starttls": True}
+        return render(request, "admin_smtp.html", {"smtp": smtp, "saved": False})
+
+    @app.post("/admin/smtp")
+    def admin_smtp_save(request: Request, conn=Depends(db_conn), host: str = Form(""),
+                         port: int = Form(587), user: str = Form(""), password: str = Form(""),
+                         from_addr: str = Form(""), starttls: bool = Form(False)):
+        cfg.save_smtp(conn, host=host, port=port, user=user, password=(password or None),
+                      from_addr=from_addr, starttls=starttls)
+        smtp = cfg.load_smtp(conn)
+        return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True})
+
+    # --- Admin: local accounts -----------------------------------------------------------
+
+    @app.get("/admin/users")
+    def admin_users(request: Request, conn=Depends(db_conn)):
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, username, disabled, created_at FROM web_users ORDER BY username")
+            users = cur.fetchall()
+        return render(request, "admin_users.html", {"users": users, "error": None})
+
+    @app.post("/admin/users/new")
+    def admin_user_create(request: Request, conn=Depends(db_conn), username: str = Form(...),
+                           password: str = Form(...)):
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM web_users WHERE username=%s", (username,))
+            if cur.fetchone():
+                cur.execute("SELECT id, username, disabled, created_at FROM web_users ORDER BY username")
+                return render(request, "admin_users.html",
+                              {"users": cur.fetchall(), "error": f"'{username}' already exists"},
+                              status_code=400)
+            cur.execute("INSERT INTO web_users (username, password_hash) VALUES (%s, %s)",
+                        (username, passwords.hash_password(password)))
+        conn.commit()
+        return RedirectResponse(url="/admin/users", status_code=303)
+
+    @app.post("/admin/users/{user_id}/toggle")
+    def admin_user_toggle(request: Request, user_id: int, conn=Depends(db_conn)):
+        with conn.cursor() as cur:
+            cur.execute("UPDATE web_users SET disabled = NOT disabled WHERE id=%s", (user_id,))
+        conn.commit()
+        return RedirectResponse(url="/admin/users", status_code=303)
+
+    @app.post("/admin/users/{user_id}/password")
+    def admin_user_password(request: Request, user_id: int, conn=Depends(db_conn),
+                             password: str = Form(...)):
+        with conn.cursor() as cur:
+            cur.execute("UPDATE web_users SET password_hash=%s WHERE id=%s",
+                        (passwords.hash_password(password), user_id))
+        conn.commit()
+        return RedirectResponse(url="/admin/users", status_code=303)
+
+
+def _split_emails(raw: str) -> list[str]:
+    return [e.strip() for e in raw.replace(",", "\n").splitlines() if e.strip()]

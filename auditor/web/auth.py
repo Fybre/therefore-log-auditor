@@ -1,49 +1,69 @@
-"""Session-cookie auth for the dashboard.
-
-This is a placeholder identity provider: one admin login from the environment
-(AUDITOR_WEB_USER / AUDITOR_WEB_PASSWORD), checked with a constant-time compare and stored in a
-signed session cookie. It exists so every route already goes through `current_user()` and every
-write already records a real `User.username` - swapping this out for Entra ID/OIDC later means
-replacing `authenticate()` and the /login route with an OIDC redirect + callback that populates
-`request.session["user"]`, not touching any page or the findings-review code that reads it.
-"""
+"""Session-cookie auth against local dashboard accounts (table `web_users`, managed at
+/admin/users and via `auditor create-user`). Entra ID/OIDC was considered and explicitly not
+wanted for now - local accounts are the intended long-term auth model here, not a placeholder."""
 from __future__ import annotations
 
-import hmac
 import os
-import secrets
 from dataclasses import dataclass
 
+import psycopg
 from starlette.requests import Request
 from starlette.responses import RedirectResponse
+
+from .. import passwords
 
 PUBLIC_PATHS = {"/login", "/static"}
 
 
 @dataclass
 class User:
+    id: int
     username: str
 
 
-def authenticate(username: str, password: str) -> User | None:
-    exp_user = os.environ.get("AUDITOR_WEB_USER", "")
-    exp_pass = os.environ.get("AUDITOR_WEB_PASSWORD", "")
-    if not (exp_user and exp_pass):
+def authenticate(conn: psycopg.Connection, username: str, password: str) -> User | None:
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, username, password_hash FROM web_users WHERE username=%s AND NOT disabled",
+                    (username,))
+        row = cur.fetchone()
+    if not row or not passwords.verify_password(password, row["password_hash"]):
         return None
-    if hmac.compare_digest(username, exp_user) and hmac.compare_digest(password, exp_pass):
-        return User(username=username)
-    return None
+    return User(id=row["id"], username=row["username"])
+
+
+def bootstrap_first_admin(conn: psycopg.Connection) -> None:
+    """If no dashboard accounts exist yet, seed one from AUDITOR_WEB_USER/PASSWORD (.env) so
+    there's a way to log in at all. Once any account exists, this is a no-op forever - manage
+    accounts from /admin/users or `auditor create-user` after that."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT count(*) AS n FROM web_users")
+        if cur.fetchone()["n"] > 0:
+            return
+    username, password = os.environ.get("AUDITOR_WEB_USER"), os.environ.get("AUDITOR_WEB_PASSWORD")
+    if not (username and password):
+        import logging
+        logging.getLogger(__name__).warning(
+            "No dashboard accounts exist and AUDITOR_WEB_USER/PASSWORD are not set - nobody can "
+            "log in. Run `auditor create-user <name>` to create one.")
+        return
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO web_users (username, password_hash) VALUES (%s, %s)",
+                    (username, passwords.hash_password(password)))
+    conn.commit()
 
 
 def current_user(request: Request) -> User | None:
-    username = request.session.get("user")
-    return User(username=username) if username else None
+    session_user = request.session.get("user")
+    if not session_user:
+        return None
+    return User(id=session_user["id"], username=session_user["username"])
 
 
 def session_secret() -> str:
     secret = os.environ.get("AUDITOR_WEB_SECRET")
     if not secret:
         import logging
+        import secrets
         logging.getLogger(__name__).warning(
             "AUDITOR_WEB_SECRET not set - using a random secret, so sessions will not survive a "
             "restart. Set it in .env for a real deployment.")

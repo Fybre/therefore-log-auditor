@@ -67,22 +67,30 @@ Every DB-backed test does `DROP SCHEMA public CASCADE` first - pointing `TEST_DA
 the real `auditor` DB wipes real findings/events (this happened once, on 29 Sep; craigdemo's
 findings were recoverable by re-running `auditor run`, but don't repeat the mistake).
 
-Config:
-- `.env` (gitignored). It holds `LLM_BASE_URL`, `LLM_API_KEY` (OpenRouter key, $250 limit),
-  `LLM_MODEL`, `THEREFORE_CRAIGDEMO_USERNAME/PASSWORD` (currently Craig's own login; **replace with
-  a dedicated read-only service account**) and optional `SMTP_*` (empty, so no email is sent yet).
+Config (rewritten 29 Sep - see "Dashboard config" below for the full story):
+- **Tenants/servers, per-tenant rule toggles and SMTP delivery now live in the database**,
+  managed from the dashboard (Tenants / SMTP admin pages), not files. `config/tenants.yaml` is
+  legacy-only, read once by `auditor import-legacy-config`.
+- `.env` (gitignored) now only holds what has to exist before the database does: `LLM_BASE_URL`,
+  `LLM_API_KEY` (OpenRouter key, $250 limit), `LLM_MODEL`, `AUDITOR_WEB_USER/PASSWORD/SECRET`
+  (dashboard login/session), and `AUDITOR_ENC_KEY` (Fernet key encrypting tenant/SMTP passwords
+  at rest - **keep it stable, losing it means every stored password becomes unreadable**).
   `DATABASE_URL` is set by compose.
-- `config/tenants.yaml` (gitignored; copy from `tenants.example.yaml`) has per-tenant `base_url`,
-  `log_category_no`, `log_tz`, `display_tz`, schedule cron (in display_tz, default `30 3 * * *`),
-  `llm.enabled/redact`, `digest.email_to`, and `known.users/ips/windows/notes`.
-- `config/rules.yaml` holds the rule thresholds (per-tenant overrides go under `rules:` in
-  tenants.yaml).
+- `config/rules.yaml` still holds the *global default* rule thresholds - only per-tenant
+  overrides/toggles moved to the database (`tenant_rule_settings` table, editable at
+  `/admin/tenants/{id}/rules`).
 
 ## Code map
 
 ```
 auditor/
-  config.py      .env loader, Tenant/Settings dataclasses, per-tenant creds via THEREFORE_<ID>_*
+  config.py      Tenant/Settings dataclasses; tenants/rule-overrides/SMTP are DB-backed now (see
+                 load_tenants/save_tenant/rule_settings_for/set_rule_setting/load_smtp/save_smtp);
+                 load_settings() is env/file-only (safe before migrations run), refresh_from_db()
+                 populates Settings.tenants/smtp from the database once a connection exists
+  crypto.py      Fernet encrypt/decrypt for tenant + SMTP passwords at rest (key: AUDITOR_ENC_KEY)
+  passwords.py   PBKDF2-SHA256 hashing for dashboard accounts (stdlib only, no bcrypt dependency)
+  legacy_import.py  one-time config/tenants.yaml + THEREFORE_<ID>_*/SMTP_* .env -> database import
   db.py          psycopg3 connect + numbered SQL migrations (auditor/migrations/NNN_*.sql)
   therefore.py   REST client: Logfiles listing (month windows), GetDocumentStream, GetSettings
   parsers.py     LogFormat 4 (Server, 11 pipe columns) + 5/6 (Migrate / Content Connector free text)
@@ -92,14 +100,21 @@ auditor/
   llm.py         OpenAICompatProvider (json_schema strict, falls back to json_object), Redactor, triage, summary
   digest.py      gather/render HTML + Markdown, write reports/<tenant>/, SMTP send
   pipeline.py    run_tenant(): collect -> snapshot -> rules (UTC-midnight-aligned window) -> triage -> digest
-  scheduler.py   APScheduler: daily cron per tenant + hourly catch-up (6h) until the day's log arrives
-  cli.py         auditor migrate | run | backfill | serve | web | findings
-  web/app.py     FastAPI dashboard: tenants index, findings queue, finding detail + evidence,
-                 known-activity (read-only), review (verdict feedback: status + note)
-  web/auth.py    Session-cookie login, single admin account from env - see docstring for the
-                 intended Entra ID/OIDC swap point (replace authenticate() + /login route only)
+  scheduler.py   APScheduler: daily cron per tenant + hourly catch-up (6h). A `reconcile` job runs
+                 every 5 min, re-reading tenants from the DB and add/remove/reschedule-ing jobs, so
+                 dashboard changes take effect without restarting the `auditor` (serve) container
+  cli.py         auditor migrate | run | backfill | serve | web | findings | create-user |
+                 import-legacy-config
+  web/app.py     FastAPI dashboard: findings queue/detail/evidence/review, known-activity
+                 (read-only), and /admin/* config management (tenants CRUD, per-tenant rule
+                 toggles, SMTP, local accounts)
+  web/auth.py    Session-cookie login against the `web_users` table (PBKDF2). Local accounts are
+                 the intended long-term model - Entra ID/OIDC was considered and explicitly
+                 declined (29 Sep). First account is seeded from AUDITOR_WEB_USER/PASSWORD on
+                 first boot only if web_users is empty; manage further accounts at /admin/users
 ```
-DB tables: `log_files`, `events`, `findings`, `settings_snapshots`, `runs`, `schema_migrations`.
+DB tables: `log_files`, `events`, `findings`, `settings_snapshots`, `runs`, `schema_migrations`,
+`web_users`, `tenants`, `tenant_rule_settings`, `app_settings` (added 29 Sep - migration 004).
 
 Rules: `brute_force` (per-user sliding window + password spray per IP), `success_after_failures`,
 `new_entity` (new user / new public IP / first admin-tool use via Console or Solution Designer; 14-day
@@ -204,26 +219,46 @@ Behaviours worth knowing:
    pushed and tracked as `origin/main`. Checked git history first — no real secrets were ever
    committed (`.env`/`config/tenants.yaml` were always gitignored, only placeholder values exist).
 7. **Phase 2** (per the design doc):
-   - ~~web dashboard~~ Started 29 Sep: FastAPI app at `auditor/web/`, runs as the `web` compose
-     service on :8080. Findings queue (`/t/{tenant}/findings`, filterable by severity/status/days),
-     finding detail with evidence lines and incident cross-links (`/t/{tenant}/findings/{id}`),
-     known-activity display (read-only), and verdict feedback (a status + note per finding, saved
-     to `findings.reviewed_by/reviewed_note/reviewed_at` and fed back into future LLM triage of
-     that rule via `llm._past_verdicts`). Login is a single admin account from
-     `AUDITOR_WEB_USER`/`AUDITOR_WEB_PASSWORD`/`AUDITOR_WEB_SECRET` in `.env` - a deliberate
-     placeholder, see `auditor/web/auth.py`'s docstring for the Entra ID/OIDC swap point (only
-     `authenticate()` and the `/login` route need replacing; every page already reads identity via
-     `current_user()`). Tested via `tests/test_web.py` (FastAPI TestClient) and manually against
-     live craigdemo data through the compose `web` service - review-submit round-trip confirmed
-     working. Not yet done: known-activity editing in the UI (currently read-only, edit
-     `tenants.yaml` + restart), dashboard-level incident-group rendering to match the digest
-     (the findings table shows an "N related" pill but still lists each finding as its own row),
-     and real auth.
+   - ~~web dashboard~~ Started 29 Sep, config management added later the same day: FastAPI app at
+     `auditor/web/`, runs as the `web` compose service on :8080. Findings queue
+     (`/t/{tenant}/findings`, filterable by severity/status/days), finding detail with evidence
+     lines and incident cross-links (`/t/{tenant}/findings/{id}`), known-activity display
+     (read-only), and verdict feedback (a status + note per finding, saved to
+     `findings.reviewed_by/reviewed_note/reviewed_at` and fed back into future LLM triage of that
+     rule via `llm._past_verdicts`). Login is against local accounts in `web_users`
+     (PBKDF2-hashed) - **Craig explicitly said Entra ID is not required and local accounts are
+     fine**, so this is the intended long-term model, not a placeholder (superseding what an
+     earlier session note said). Tested via `tests/test_web.py` (FastAPI TestClient, 16 tests) and
+     manually against live craigdemo data through the compose `web` service. Not yet done:
+     known-activity editing in the UI (still read-only), and dashboard-level incident-group
+     rendering to match the digest (the findings table shows an "N related" pill but still lists
+     each finding as its own row).
+   - ~~**Config management (tenants/servers, rule toggles, SMTP) from the dashboard**~~ Done
+     29 Sep, same session, per Craig's explicit request ("rather than configuration through env
+     I want to be able to add/remove/configure tenants/servers from the dashboard... toggling what
+     events are to flag alerts... setup for SMTP... entra id auth is not required, local user
+     accounts is fine"). Tenants/servers, per-tenant rule enable/disable + threshold overrides, and
+     SMTP delivery moved from `config/tenants.yaml`/`.env` into the database (migration 004:
+     `tenants`, `tenant_rule_settings`, `app_settings`, `web_users`). Managed at `/admin/tenants`
+     (CRUD, live-tested by adding/editing/deleting a real tenant through the running dashboard),
+     `/admin/tenants/{id}/rules` (per-rule inherit/on/off + optional JSON threshold override,
+     live-tested), `/admin/smtp`, `/admin/users`. Passwords (tenant Therefore logins, SMTP) are
+     Fernet-encrypted at rest via `AUDITOR_ENC_KEY`; dashboard passwords are PBKDF2-hashed.
+     The scheduler (`auditor serve`) reconciles tenants from the DB every 5 minutes, so dashboard
+     changes take effect without a restart - confirmed in the logs after adding a test tenant.
+     `auditor import-legacy-config` migrates old `tenants.yaml`/env-based setups once; craigdemo's
+     existing config was imported this way and re-verified with a live `auditor run`.
+     **`config/rules.yaml` still holds the global default thresholds** - only overrides moved to
+     the database, on purpose (Craig didn't ask for that to move, and keeping a file-based base
+     config was simpler than also relocating it).
+     Not yet done: no RBAC (every dashboard account can manage every tenant - fine for a single
+     operator, revisit before onboarding a second team), and `/admin/tenants` has no bulk import
+     beyond the one-time legacy path.
    - Teams webhook alerts for High
    - daily PDF report saved into a Therefore "Audit Reports" category
-   - Entra ID sign-in (see the dashboard note above - the swap point already exists)
    - Postgres row-level security per tenant
-   - add Sumitomo as a second tenant
+   - add Sumitomo as a second tenant - now genuinely just "add it from the dashboard" per Craig's
+     stated plan ("once we can configure tenants from the dashboard I will add another")
 8. Later: Migrate/Content Connector-specific rules (disk space "MB free", fetch/process errors),
    GeoIP enrichment (MaxMind GeoLite2), an optional "archive by size" setting for faster
    detection, and optionally deleting processed log docs (they count toward document limits;

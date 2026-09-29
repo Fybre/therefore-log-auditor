@@ -8,7 +8,14 @@
 </head>
 <body>
 <header>
-  <a href="/">Therefore Log Auditor</a>
+  <div>
+    <a href="/">Therefore Log Auditor</a>
+    {% if user %}
+    <a href="/admin/tenants" style="margin-left:16px;font-weight:400">Tenants</a>
+    <a href="/admin/smtp" style="margin-left:16px;font-weight:400">SMTP</a>
+    <a href="/admin/users" style="margin-left:16px;font-weight:400">Accounts</a>
+    {% endif %}
+  </div>
   {% if user %}
   <span class="user">{{ user.username }}
     <form method="post" action="/logout"><button type="submit">Log out</button></form>

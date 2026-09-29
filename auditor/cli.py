@@ -1,8 +1,9 @@
-"""Command line: auditor {migrate,run,backfill,serve,web,findings}"""
+"""Command line: auditor {migrate,run,backfill,serve,web,findings,create-user,import-legacy-config}"""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import getpass
 import json
 import logging
 import sys
@@ -27,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--since", required=True, help="YYYY-MM-DD")
     b.add_argument("--llm", action="store_true", help="also triage the findings (costs tokens)")
 
-    sub.add_parser("serve", help="run the scheduler (each tenant's schedule.daily cron)")
+    sub.add_parser("serve", help="run the scheduler (tenants + schedules come from the database)")
 
     w = sub.add_parser("web", help="run the findings dashboard")
     w.add_argument("--host", default="0.0.0.0")
@@ -37,6 +38,14 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--tenant", required=True)
     f.add_argument("--days", type=int, default=7)
     f.add_argument("--min-severity", default="low", choices=["info", "low", "medium", "high"])
+
+    u = sub.add_parser("create-user", help="create/update a dashboard login")
+    u.add_argument("username")
+    u.add_argument("--password", help="omit to be prompted (not echoed)")
+
+    sub.add_parser("import-legacy-config",
+                    help="one-time: import config/tenants.yaml + THEREFORE_<ID>_USERNAME/PASSWORD "
+                         "and SMTP_* from .env into the database")
 
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO,
@@ -48,6 +57,13 @@ def main(argv: list[str] | None = None) -> int:
         with connect(settings.database_url) as conn:
             print("applied:", migrate(conn) or "nothing to do")
         return 0
+
+    if a.cmd in ("run", "backfill", "findings"):
+        from . import config
+        from .db import connect, migrate
+        with connect(settings.database_url) as conn:
+            migrate(conn)
+            config.refresh_from_db(settings, conn)
 
     if a.cmd == "run":
         from .pipeline import run_tenant
@@ -79,9 +95,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if a.cmd == "findings":
-        from .db import connect
         order = ["info", "low", "medium", "high"]
         allowed = order[order.index(a.min_severity):]
+        from .db import connect
         with connect(settings.database_url) as conn, conn.cursor() as cur:
             cur.execute("""SELECT severity, rule_id, title, last_ts, llm_verdict, incident_key FROM findings
                            WHERE tenant_id=%s AND last_ts >= now() - %s * interval '1 day' AND severity = ANY(%s)
@@ -91,6 +107,32 @@ def main(argv: list[str] | None = None) -> int:
                       + (f"  [{row['llm_verdict']}]" if row["llm_verdict"] else "")
                       + (f"  (incident: {row['incident_key']})" if row["incident_key"] else ""))
         return 0
+
+    if a.cmd == "create-user":
+        from . import passwords
+        from .db import connect, migrate
+        password = a.password or getpass.getpass(f"Password for {a.username}: ")
+        with connect(settings.database_url) as conn:
+            migrate(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """INSERT INTO web_users (username, password_hash) VALUES (%s, %s)
+                       ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash,
+                           disabled=false""",
+                    (a.username, passwords.hash_password(password)))
+            conn.commit()
+        print(f"ok: {a.username} can now log in to the dashboard")
+        return 0
+
+    if a.cmd == "import-legacy-config":
+        from .legacy_import import import_legacy_config
+        from .db import connect, migrate
+        with connect(settings.database_url) as conn:
+            migrate(conn)
+            report = import_legacy_config(conn)
+        print(json.dumps(report, indent=1))
+        return 0
+
     return 1
 
 

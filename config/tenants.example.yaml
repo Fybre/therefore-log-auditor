@@ -1,4 +1,6 @@
-# Copy to config/tenants.yaml. Secrets come from .env (THEREFORE_<ID>_USERNAME/_PASSWORD).
+# Legacy format, only read by `auditor import-legacy-config` (a one-time upgrade path). New
+# tenants are added from the dashboard (Tenants -> Add tenant), not this file. Copy to
+# config/tenants.yaml and set THEREFORE_<ID>_USERNAME/_PASSWORD in .env if you need to import.
 tenants:
   - id: craigdemo
     base_url: https://craigdemo.thereforeonline.com
