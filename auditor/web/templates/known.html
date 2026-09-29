@@ -38,6 +38,20 @@
     <label>Notes (one per line, informational only - shown to the LLM as context, does not suppress anything)</label><br>
     <textarea name="notes" rows="2" style="width:100%">{{ known.notes | join('\n') if known.notes else '' }}</textarea>
   </div>
+  {% if mutable_kinds %}
+  <div>
+    <label>Muted categories</label>
+    {% for key, label, help in mutable_kinds %}
+    <div style="margin-top:6px">
+      <label style="font-weight:normal">
+        <input type="checkbox" name="mute__{{ key }}" value="1" {% if key in (known.muted_kinds or []) %}checked{% endif %}>
+        {{ label }}
+      </label>
+      <p class="muted" style="margin:2px 0 0 22px;font-size:12px">{{ help }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <button type="submit" style="align-self:flex-start;padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
 </form>
 {% endblock %}

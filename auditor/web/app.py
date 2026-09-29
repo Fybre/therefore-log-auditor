@@ -190,20 +190,24 @@ def register_routes(app: FastAPI) -> None:
 
     @app.get("/t/{tenant_id}/known")
     def known_activity(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        from ..rules.settings_schema import MUTABLE_KINDS
         tenant = cfg.get_tenant(conn, tenant_id)
         if not tenant:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
-        return render(request, "known.html", {"tenant": tenant, "known": tenant.known or {}, "saved": False})
+        return render(request, "known.html", {"tenant": tenant, "known": tenant.known or {},
+                                              "saved": False, "mutable_kinds": MUTABLE_KINDS})
 
     @app.post("/t/{tenant_id}/known")
-    def known_activity_save(request: Request, tenant_id: str, conn=Depends(db_conn),
-                             users: str = Form(""), ips: str = Form(""),
-                             windows: str = Form(""), notes: str = Form("")):
+    async def known_activity_save(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        from ..rules.settings_schema import MUTABLE_KINDS
+        form = await request.form()
         tenant = cfg.get_tenant(conn, tenant_id)
         if not tenant:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
-        known = {"users": _split_lines(users), "ips": _split_lines(ips),
-                "windows": _parse_windows(windows), "notes": _split_lines(notes)}
+        muted = [key for key, _, _ in MUTABLE_KINDS if form.get(f"mute__{key}")]
+        known = {"users": _split_lines(form.get("users", "")), "ips": _split_lines(form.get("ips", "")),
+                "windows": _parse_windows(form.get("windows", "")), "notes": _split_lines(form.get("notes", "")),
+                "muted_kinds": muted}
         cfg.save_tenant(conn, id=tenant_id, base_url=tenant.base_url, username=tenant.username,
                         password=None, tenant_name_override=tenant.tenant_name_override,
                         log_category_no=tenant.log_category_no, log_tz=tenant.log_tz,
@@ -211,7 +215,7 @@ def register_routes(app: FastAPI) -> None:
                         llm_enabled=tenant.llm.get("enabled", True), llm_redact=tenant.llm.get("redact", True),
                         digest_email_to=tenant.digest.get("email_to", []), known=known, enabled=tenant.enabled)
         return render(request, "known.html", {"tenant": cfg.get_tenant(conn, tenant_id),
-                                              "known": known, "saved": True})
+                                              "known": known, "saved": True, "mutable_kinds": MUTABLE_KINDS})
 
     # --- Admin: tenants/servers ------------------------------------------------------------
 
@@ -339,32 +343,50 @@ def register_routes(app: FastAPI) -> None:
     def admin_tenant_rules(request: Request, tenant_id: str, conn=Depends(db_conn)):
         from ..rules import builtin  # noqa: F401  (registers rules)
         from ..rules.engine import RULES
+        from ..rules.settings_schema import RULE_FIELDS
         settings: Settings = request.app.state.settings
         overrides = cfg.rule_settings_for(conn, tenant_id)
         rows = []
         for rule_id in sorted(RULES):
             global_default = bool(settings.rules.get(rule_id, {}).get("enabled", True))
             ov = overrides.get(rule_id, {})
+            override_config = ov.get("config") or {}
+            fields = []
+            for key, ftype, label, help_text in RULE_FIELDS.get(rule_id, []):
+                default_val = settings.rules.get(rule_id, {}).get(key)
+                value = override_config[key] if key in override_config else default_val
+                if ftype == "userlist":
+                    value = "\n".join(value or [])
+                fields.append({"key": key, "type": ftype, "label": label, "help": help_text, "value": value})
             rows.append({"rule_id": rule_id, "global_default": global_default,
-                        "enabled": ov.get("enabled"), "config": ov.get("config") or {}})
+                        "enabled": ov.get("enabled"), "fields": fields})
         return render(request, "admin_tenant_rules.html", {"tenant_id": tenant_id, "rows": rows})
 
     @app.post("/admin/tenants/{tenant_id}/rules")
     async def admin_tenant_rules_save(request: Request, tenant_id: str, conn=Depends(db_conn)):
         from ..rules import builtin  # noqa: F401
         from ..rules.engine import RULES
+        from ..rules.settings_schema import RULE_FIELDS
+        settings: Settings = request.app.state.settings
         form = await request.form()
         for rule_id in RULES:
             choice = form.get(f"enabled__{rule_id}", "inherit")
             enabled = {"inherit": None, "on": True, "off": False}.get(choice)
-            raw_config = (form.get(f"config__{rule_id}", "") or "").strip()
-            config_obj = {}
-            if raw_config:
-                import json
+            defaults = settings.rules.get(rule_id, {})
+            config_obj: dict = {}
+            for key, ftype, _, _ in RULE_FIELDS.get(rule_id, []):
+                raw = form.get(f"{rule_id}__{key}", "")
                 try:
-                    config_obj = json.loads(raw_config)
+                    if ftype == "int":
+                        value = int(raw)
+                    elif ftype == "float":
+                        value = float(raw)
+                    else:   # userlist
+                        value = _split_lines(raw)
                 except ValueError:
-                    continue   # ignore unparsable JSON rather than 500 the whole save
+                    continue   # leave that one field at its current value rather than 500
+                if value != defaults.get(key):   # only store what actually differs from the default
+                    config_obj[key] = value
             cfg.set_rule_setting(conn, tenant_id, rule_id, enabled, config_obj)
         return RedirectResponse(url=f"/admin/tenants/{tenant_id}/rules", status_code=303)
 

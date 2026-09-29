@@ -106,6 +106,10 @@ def suppression_for(f: Finding, tenant: Tenant) -> str | None:
         return "known user"
     if f.subject_ips and all(ip in ips for ip in f.subject_ips):
         return "known ip"
+    muted = set(known.get("muted_kinds", []))
+    kind = (f.details or {}).get("kind")
+    if kind and f"{f.rule_id}:{kind}" in muted:
+        return "muted category"
     for w in known.get("windows", []) or []:
         try:
             ws, we = dt.datetime.fromisoformat(str(w["start"])), dt.datetime.fromisoformat(str(w["end"]))
@@ -153,7 +157,8 @@ def save_findings(conn: psycopg.Connection, tenant: Tenant, findings: list[Findi
                        last_ts=GREATEST(findings.last_ts, EXCLUDED.last_ts),
                        details=EXCLUDED.details, evidence_ids=EXCLUDED.evidence_ids,
                        rule_severity=EXCLUDED.rule_severity,
-                       severity=CASE WHEN findings.llm_verdict IS NOT NULL
+                       severity=CASE WHEN EXCLUDED.suppressed_by IS NOT NULL THEN EXCLUDED.severity
+                                     WHEN findings.llm_verdict IS NOT NULL
                                       AND findings.details = EXCLUDED.details
                                      THEN findings.severity ELSE EXCLUDED.severity END,
                        suppressed_by=EXCLUDED.suppressed_by,

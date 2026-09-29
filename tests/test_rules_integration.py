@@ -100,3 +100,35 @@ def test_incident_grouping_shares_one_llm_call():
     assert len(rows) == 2
     assert all(r["llm_verdict"] == "suspicious" and r["severity"] == "high" for r in rows)
     conn.close()
+
+
+def test_muting_overrides_severity_even_after_llm_triage():
+    """Regression: once a finding had an llm_verdict, re-running save_findings with unchanged
+    details used to keep the old (pre-mute) severity instead of applying the new suppression,
+    because the upsert's severity CASE only looked at whether `details` changed. A newly-muted
+    category must always win and force severity back to info."""
+    from auditor import db
+    from auditor.config import Settings, Tenant
+    from auditor.rules.engine import Finding, save_findings
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    conn.commit()
+    db.migrate(conn)
+    tenant = Tenant(id="t3", base_url="https://t3.thereforeonline.com", display_tz="UTC")
+    now = dt.datetime(2026, 5, 1, 10, 0, tzinfo=dt.timezone.utc)
+    f = Finding(rule_id="new_entity", dedupe_key="ip:9.9.9.9", title="New IP address: 9.9.9.9",
+                severity="low", first_ts=now, last_ts=now, details={"kind": "ip", "value": "9.9.9.9"})
+    ids = save_findings(conn, tenant, [f])
+    with conn.cursor() as cur:
+        cur.execute("UPDATE findings SET llm_verdict='suspicious', severity='medium' WHERE id=%s", (ids[0],))
+    conn.commit()
+
+    tenant.known = {"muted_kinds": ["new_entity:ip"]}
+    save_findings(conn, tenant, [f])   # same details, but now muted
+    with conn.cursor() as cur:
+        cur.execute("SELECT severity, suppressed_by FROM findings WHERE id=%s", (ids[0],))
+        row = cur.fetchone()
+    conn.close()
+    assert row["severity"] == "info"
+    assert row["suppressed_by"] == "muted category"

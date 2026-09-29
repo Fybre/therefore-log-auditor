@@ -4,10 +4,9 @@
 <p><a class="row-link muted" href="/admin/tenants">&larr; tenants</a></p>
 <h1>{{ tenant_id }} &middot; which events flag alerts</h1>
 <p class="muted">Per-rule override for this tenant. "Inherit" uses the global default from
-  config/rules.yaml. Advanced config is an optional JSON object of threshold overrides
-  (e.g. <code>{"min_per_day": 500}</code>, or <code>{"kinds": ["user", "admin_client"]}</code> to
-  drop "new IP" findings from <code>new_entity</code> while keeping new-user detection)
-  - leave blank to use the defaults.</p>
+  config/rules.yaml. To stop new-IP findings specifically without losing history, use
+  <a href="/t/{{ tenant_id }}/known">Known activity</a> instead - it keeps recording them,
+  just auto-downgraded, rather than never creating them.</p>
 <form method="post" action="/admin/tenants/{{ tenant_id }}/rules">
   {% for r in rows %}
   <div class="card" style="max-width:640px">
@@ -22,10 +21,28 @@
         <option value="off" {% if r.enabled == false %}selected{% endif %}>Disabled</option>
       </select>
     </div>
-    <label style="display:block;margin-top:10px">Advanced config (JSON, optional)</label>
-    <textarea name="config__{{ r.rule_id }}" rows="4" spellcheck="false"
-              style="width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;margin-top:4px"
-              >{{ (r.config | tojson(indent=2)) if r.config else '' }}</textarea>
+    {% if r.fields %}
+    <table style="margin-top:10px">
+      {% for f in r.fields %}
+      <tr>
+        <td style="width:55%">
+          {{ f.label }}
+          {% if f.help %}<div class="muted" style="font-size:12px;margin-top:2px">{{ f.help }}</div>{% endif %}
+        </td>
+        <td>
+          {% if f.type == "userlist" %}
+          <textarea name="{{ r.rule_id }}__{{ f.key }}" rows="3" style="width:100%;box-sizing:border-box">{{ f.value }}</textarea>
+          {% else %}
+          <input type="number" {% if f.type == "float" %}step="0.1"{% endif %}
+                 name="{{ r.rule_id }}__{{ f.key }}" value="{{ f.value }}" style="width:100%;box-sizing:border-box">
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted" style="margin:10px 0 0">No tunable thresholds for this rule.</p>
+    {% endif %}
   </div>
   {% endfor %}
   <button type="submit" style="margin-top:4px;padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
