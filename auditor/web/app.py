@@ -170,6 +170,24 @@ def register_routes(app: FastAPI) -> None:
         conn.commit()
         return RedirectResponse(url=f"/t/{tenant_id}/findings/{finding_id}", status_code=303)
 
+    @app.post("/t/{tenant_id}/findings/bulk-review")
+    async def bulk_review_findings(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        form = await request.form()
+        ids = [int(i) for i in form.getlist("ids") if str(i).isdigit()]
+        status = form.get("status", "")
+        note = (form.get("note", "") or "").strip() or None
+        return_qs = form.get("return_qs", "")
+        if ids and status in REVIEW_STATUSES:
+            user = auth.current_user(request)
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE findings SET status=%s, reviewed_by=%s, reviewed_note=%s, reviewed_at=now()
+                       WHERE tenant_id=%s AND id = ANY(%s)""",
+                    (status, user.username if user else None, note, tenant_id, ids))
+            conn.commit()
+        url = f"/t/{tenant_id}/findings" + (f"?{return_qs}" if return_qs else "")
+        return RedirectResponse(url=url, status_code=303)
+
     @app.get("/t/{tenant_id}/known")
     def known_activity(request: Request, tenant_id: str, conn=Depends(db_conn)):
         tenant = cfg.get_tenant(conn, tenant_id)

@@ -178,6 +178,38 @@ def test_detect_category_ambiguous_lists_candidates(client, monkeypatch):
     assert "Logfiles2" in r.text and ">1<" in r.text
 
 
+def test_bulk_review_updates_only_selected(client):
+    from auditor import config as cfg
+    from auditor import db
+    from auditor.rules.engine import Finding, save_findings
+    _login(client)
+
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    now = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+    f2 = Finding(rule_id="new_entity", dedupe_key="user:trent", title="New user: trent",
+                severity="medium", first_ts=now, last_ts=now, subject_users=["trent"])
+    ids = save_findings(conn, tenant, [f2])
+    other_id = ids[0]
+    conn.close()
+
+    r = client.post("/t/webtest/findings/bulk-review",
+                     data={"ids": ["1"], "status": "acknowledged", "note": "bulk test",
+                           "return_qs": "min_severity=info&status=&days=30"},
+                     follow_redirects=False)
+    assert r.status_code == 303
+    assert "min_severity=info" in r.headers["location"]
+
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, status, reviewed_note FROM findings WHERE tenant_id='webtest' ORDER BY id")
+        rows = cur.fetchall()
+    conn.close()
+    assert rows[0]["status"] == "acknowledged" and rows[0]["reviewed_note"] == "bulk test"
+    other = next(r for r in rows if r["id"] == other_id)
+    assert other["status"] == "open"   # untouched - wasn't in `ids`
+
+
 def test_known_activity_edit_persists_and_suppresses(client):
     from auditor import config as cfg
     from auditor import db

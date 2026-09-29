@@ -21,23 +21,53 @@
   </select>
   <noscript><button type="submit">Filter</button></noscript>
 </form>
-<table>
-  <tr><th>Severity</th><th>Title</th><th>Rule</th><th>Status</th><th>Verdict</th><th>Last seen</th></tr>
-  {% for f in findings %}
-  <tr>
-    <td><span class="badge {{ f.severity }}">{{ f.severity }}</span></td>
-    <td>
-      <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ f.id }}">{{ f.title }}</a>
-      {% if f.incident_size and f.incident_size > 1 %}<span class="pill">{{ f.incident_size }} related</span>{% endif %}
-      {% if f.suppressed_by %}<span class="pill">{{ f.suppressed_by }}</span>{% endif %}
-    </td>
-    <td class="muted">{{ f.rule_id }}</td>
-    <td>{{ f.status }}</td>
-    <td class="muted">{{ f.llm_verdict or "-" }}</td>
-    <td class="muted">{{ f.last_ts | local_time(tenant.display_tz) }}</td>
-  </tr>
-  {% else %}
-  <tr><td colspan="6" class="muted">No findings match these filters.</td></tr>
-  {% endfor %}
-</table>
+
+<form id="bulkForm" method="post" action="/t/{{ tenant.id }}/findings/bulk-review">
+  <input type="hidden" name="return_qs"
+         value="min_severity={{ min_severity }}&status={{ status }}&days={{ days }}">
+  <div class="filters" style="display:flex;align-items:center;gap:8px;background:#fff;padding:8px 12px;border-radius:8px;margin-bottom:8px">
+    <span id="selCount" class="muted" style="font-size:13px">0 selected</span>
+    <select name="status" required>
+      <option value="" disabled selected>set status to...</option>
+      {% for s in statuses %}
+      <option value="{{ s }}">{{ s }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="note" placeholder="note (optional, applied to all selected)" style="flex:1;min-width:160px">
+    <button type="submit" onclick="return document.querySelectorAll('.row-check:checked').length > 0">Apply to selected</button>
+  </div>
+  <table>
+    <tr>
+      <th style="width:24px"><input type="checkbox" id="selAll" onclick="toggleAll(this)"></th>
+      <th>Severity</th><th>Title</th><th>Rule</th><th>Status</th><th>Verdict</th><th>Last seen</th>
+    </tr>
+    {% for f in findings %}
+    <tr>
+      <td><input type="checkbox" class="row-check" name="ids" value="{{ f.id }}" onclick="updateCount()"></td>
+      <td><span class="badge {{ f.severity }}">{{ f.severity }}</span></td>
+      <td>
+        <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ f.id }}">{{ f.title }}</a>
+        {% if f.incident_size and f.incident_size > 1 %}<span class="pill">{{ f.incident_size }} related</span>{% endif %}
+        {% if f.suppressed_by %}<span class="pill">{{ f.suppressed_by }}</span>{% endif %}
+      </td>
+      <td class="muted">{{ f.rule_id }}</td>
+      <td>{{ f.status }}</td>
+      <td class="muted">{{ f.llm_verdict or "-" }}</td>
+      <td class="muted">{{ f.last_ts | local_time(tenant.display_tz) }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="7" class="muted">No findings match these filters.</td></tr>
+    {% endfor %}
+  </table>
+</form>
+<script>
+function toggleAll(cb) {
+  document.querySelectorAll('.row-check').forEach(function (el) { el.checked = cb.checked; });
+  updateCount();
+}
+function updateCount() {
+  var n = document.querySelectorAll('.row-check:checked').length;
+  document.getElementById('selCount').textContent = n + ' selected';
+}
+</script>
 {% endblock %}
