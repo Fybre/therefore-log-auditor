@@ -268,6 +268,31 @@ def test_admin_run_now_triggers_pipeline(client, monkeypatch):
     assert "run complete" in r.text
 
 
+def test_run_now_refreshes_smtp_before_running(client, monkeypatch):
+    """Regression: app.state.settings.smtp used to be frozen at load_settings()'s empty
+    defaults for the whole life of the web process - SMTP saved via /admin/smtp after startup
+    was silently never picked up by "Run now", so write_and_send()'s `if smtp.get("host")`
+    check always failed and no digest email was ever sent, with no error anywhere."""
+    from auditor import config as cfg
+    from auditor import db
+    conn = db.connect(DB)
+    cfg.save_smtp(conn, host="smtp.example.com", port=587, user="bot", password="pw",
+                  from_addr="bot@example.com", starttls=True)
+    conn.close()
+
+    seen_smtp = {}
+
+    def fake_run_tenant(settings, tenant, **kwargs):
+        seen_smtp.update(settings.smtp)
+        return {"tenant": tenant.id, "files_new": 0, "events": 0, "findings": 0, "findings_changed": 0}
+
+    monkeypatch.setattr("auditor.pipeline.run_tenant", fake_run_tenant)
+    _login(client)
+    r = client.post("/admin/tenants/webtest/run")
+    assert r.status_code == 200
+    assert seen_smtp.get("host") == "smtp.example.com"
+
+
 def test_detect_category_uniquely(client, monkeypatch):
     monkeypatch.setattr(
         "auditor.therefore.ThereforeClient.list_categories",

@@ -45,6 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     with connect(settings.database_url) as conn:
         migrate(conn)
         auth.bootstrap_first_admin(conn)
+        cfg.refresh_from_db(settings, conn)   # SMTP is DB-config; don't start out with empty defaults
     app = FastAPI(title="Therefore Log Auditor")
     app.state.settings = settings
 
@@ -481,6 +482,13 @@ def register_routes(app: FastAPI) -> None:
         tenant = cfg.get_tenant(conn, tenant_id)
         if not tenant:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
+        # app.state.settings.smtp is whatever load_settings() set at process startup (empty
+        # defaults - SMTP is DB-config, not env) and nothing else in the web app ever refreshes
+        # it, unlike the CLI and scheduler which both do this on every invocation. Without this,
+        # write_and_send()'s `if smtp.get("host")` check silently (no error, no log line) skips
+        # sending - "Run now" would produce a report but never email it, however SMTP is
+        # configured or how recently.
+        cfg.refresh_from_db(request.app.state.settings, conn)
         stats = run_tenant(request.app.state.settings, tenant)
         return render(request, "admin_tenant_run_result.html", {"tenant_id": tenant_id, "stats": stats})
 
