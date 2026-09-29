@@ -32,6 +32,14 @@ def local_time(ts: dt.datetime | None, tz: str) -> str:
     return ts.astimezone(ZoneInfo(tz)).strftime("%d %b %Y %H:%M")
 
 
+def humanize_schedule(cron: str) -> str:
+    """"30 3 * * *" -> "03:30 daily"; anything not a plain daily pattern is shown as-is."""
+    m = _DAILY_CRON_RE.match(cron or "")
+    if m:
+        return f"{int(m.group(2)):02d}:{int(m.group(1)):02d} daily"
+    return cron
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     with connect(settings.database_url) as conn:
@@ -42,6 +50,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["local_time"] = local_time
+    templates.env.filters["humanize_schedule"] = humanize_schedule
     app.state.templates = templates
 
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -364,7 +373,7 @@ def register_routes(app: FastAPI) -> None:
             snap = cur.fetchone()
         log_settings = _decode_log_settings(snap["settings"], snap["taken_at"], row["display_tz"]) if snap else None
         return render(request, "admin_tenant_form.html", {
-            "t": tenant_id, "row": row, "error": None, "log_settings": log_settings})
+            "t": tenant_id, "row": _augment_schedule(row), "error": None, "log_settings": log_settings})
 
     @app.post("/admin/tenants/test-connection")
     async def admin_tenant_test_connection(request: Request):
@@ -423,12 +432,14 @@ def register_routes(app: FastAPI) -> None:
                              username: str = Form(""), password: str = Form(""),
                              tenant_name_override: str = Form(""), log_category_no: int = Form(1),
                              log_tz: str = Form("UTC"), display_tz: str = Form("UTC"),
-                             schedule_cron: str = Form("30 3 * * *"),
+                             schedule_hour: int = Form(3), schedule_minute: int = Form(30),
+                             use_advanced_schedule: bool = Form(False), schedule_cron_advanced: str = Form(""),
                              llm_enabled: bool = Form(False), llm_redact: bool = Form(False),
                              digest_email_to: str = Form(""), enabled: bool = Form(False)):
         if cfg.get_tenant_row(conn, id):
             return render(request, "admin_tenant_form.html",
                           {"t": None, "row": None, "error": f"Tenant '{id}' already exists"}, status_code=400)
+        schedule_cron = _compute_schedule_cron(schedule_hour, schedule_minute, use_advanced_schedule, schedule_cron_advanced)
         cfg.save_tenant(conn, id=id, base_url=base_url, username=username, password=password,
                         tenant_name_override=tenant_name_override or None,
                         log_category_no=log_category_no, log_tz=log_tz, display_tz=display_tz,
@@ -441,10 +452,13 @@ def register_routes(app: FastAPI) -> None:
                              base_url: str = Form(...), username: str = Form(""),
                              password: str = Form(""), tenant_name_override: str = Form(""),
                              log_category_no: int = Form(1), log_tz: str = Form("UTC"),
-                             display_tz: str = Form("UTC"), schedule_cron: str = Form("30 3 * * *"),
+                             display_tz: str = Form("UTC"),
+                             schedule_hour: int = Form(3), schedule_minute: int = Form(30),
+                             use_advanced_schedule: bool = Form(False), schedule_cron_advanced: str = Form(""),
                              llm_enabled: bool = Form(False), llm_redact: bool = Form(False),
                              digest_email_to: str = Form(""), enabled: bool = Form(False)):
         existing = cfg.get_tenant(conn, tenant_id)
+        schedule_cron = _compute_schedule_cron(schedule_hour, schedule_minute, use_advanced_schedule, schedule_cron_advanced)
         cfg.save_tenant(conn, id=tenant_id, base_url=base_url, username=username,
                         password=(password or None), tenant_name_override=tenant_name_override or None,
                         log_category_no=log_category_no, log_tz=log_tz, display_tz=display_tz,
@@ -591,12 +605,21 @@ def _row_from_form(form) -> dict:
     test-connection/detect-category can re-render the form with what was typed, unsaved."""
     def get(name, default=""):
         return form.get(name, default)
+    advanced = bool(get("use_advanced_schedule"))
+    try:
+        hour, minute = int(get("schedule_hour") or 3), int(get("schedule_minute") or 30)
+    except ValueError:
+        hour, minute = 3, 30
+    cron_advanced = get("schedule_cron_advanced", "")
     return {
         "base_url": get("base_url"), "therefore_username": get("username"),
         "password": get("password"),   # echoed back so a successful test doesn't need retyping
         "tenant_name_override": get("tenant_name_override"),
         "log_category_no": int(get("log_category_no") or 1), "log_tz": get("log_tz", "UTC"),
-        "display_tz": get("display_tz", "UTC"), "schedule_cron": get("schedule_cron", "30 3 * * *"),
+        "display_tz": get("display_tz", "UTC"),
+        "schedule_cron": _compute_schedule_cron(hour, minute, advanced, cron_advanced),
+        "schedule_hour": hour, "schedule_minute": minute, "schedule_advanced": advanced,
+        "schedule_cron_advanced": cron_advanced,
         "llm_enabled": bool(get("llm_enabled")), "llm_redact": bool(get("llm_redact")),
         "digest_email_to": _split_emails(get("digest_email_to")), "enabled": bool(get("enabled")),
     }
@@ -636,6 +659,34 @@ def _split_emails(raw: str) -> list[str]:
 
 def _split_lines(raw: str) -> list[str]:
     return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+_DAILY_CRON_RE = re.compile(r"^\s*(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*\s*$")
+
+
+def _compute_schedule_cron(hour: int, minute: int, advanced: bool, raw_cron: str) -> str:
+    """The stored schedule is always a plain cron string (scheduler.py just hands it to
+    CronTrigger.from_crontab), but almost everyone only wants "run once a day at HH:MM" - so
+    the form offers a time picker by default and only asks for real cron syntax if you opt in."""
+    if advanced:
+        return (raw_cron or "").strip() or "30 3 * * *"
+    hour = max(0, min(23, hour))
+    minute = max(0, min(59, minute))
+    return f"{minute} {hour} * * *"
+
+
+def _augment_schedule(row: dict) -> dict:
+    """Adds schedule_hour/schedule_minute/schedule_advanced/schedule_cron_advanced to a tenant
+    row (from the database) so the form can default to the simple time picker, only falling
+    back to showing raw cron when the stored schedule isn't a plain daily "M H * * *" pattern."""
+    cron = row.get("schedule_cron") or "30 3 * * *"
+    m = _DAILY_CRON_RE.match(cron)
+    if m and int(m.group(1)) < 60 and int(m.group(2)) < 24:
+        row["schedule_minute"], row["schedule_hour"], row["schedule_advanced"] = int(m.group(1)), int(m.group(2)), False
+    else:
+        row["schedule_hour"], row["schedule_minute"], row["schedule_advanced"] = 3, 30, True
+    row["schedule_cron_advanced"] = cron
+    return row
 
 
 _WINDOW_RE = re.compile(r"^(?P<start>.+?)\s+to\s+(?P<end>.+):\s*(?P<note>.*)$")

@@ -80,32 +80,62 @@ def test_bad_login_rejected(client):
 
 
 def test_admin_create_edit_delete_tenant(client):
+    from auditor import config as cfg
+    from auditor import db
     _login(client)
     r = client.post("/admin/tenants/new", data={
         "id": "newtenant", "base_url": "https://newtenant.thereforeonline.com",
         "username": "svc", "password": "secret123", "log_category_no": "1",
-        "log_tz": "UTC", "display_tz": "UTC", "schedule_cron": "0 4 * * *",
+        "log_tz": "UTC", "display_tz": "UTC", "schedule_hour": "4", "schedule_minute": "0",
         "llm_enabled": "true", "llm_redact": "true", "digest_email_to": "a@example.com",
         "enabled": "true"}, follow_redirects=False)
     assert r.status_code == 303
     r = client.get("/admin/tenants")
     assert "newtenant" in r.text
+    assert "04:00 daily" in r.text
 
     # editing without a password keeps the existing (encrypted) one
     r = client.post("/admin/tenants/newtenant/edit", data={
         "base_url": "https://newtenant.thereforeonline.com", "username": "svc", "password": "",
         "log_category_no": "1", "log_tz": "UTC", "display_tz": "UTC",
-        "schedule_cron": "0 5 * * *", "llm_enabled": "true", "llm_redact": "true",
+        "schedule_hour": "5", "schedule_minute": "0", "llm_enabled": "true", "llm_redact": "true",
         "digest_email_to": "", "enabled": "true"}, follow_redirects=False)
     assert r.status_code == 303
     r = client.get("/admin/tenants")
-    assert "0 5 * * *" in r.text
+    assert "05:00 daily" in r.text
+
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "newtenant")
+    conn.close()
+    assert tenant.schedule["daily"] == "0 5 * * *"
 
     r = client.post("/admin/tenants/newtenant/delete", data={"confirm": "newtenant"},
                      follow_redirects=False)
     assert r.status_code == 303
     r = client.get("/admin/tenants")
     assert "newtenant" not in r.text
+
+
+def test_admin_tenant_advanced_schedule(client):
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.post("/admin/tenants/new", data={
+        "id": "weekdaytenant", "base_url": "https://weekdaytenant.thereforeonline.com",
+        "username": "svc", "password": "secret123", "log_category_no": "1",
+        "log_tz": "UTC", "display_tz": "UTC", "use_advanced_schedule": "true",
+        "schedule_cron_advanced": "30 3 * * 1-5", "llm_enabled": "true", "llm_redact": "true",
+        "digest_email_to": "", "enabled": "true"}, follow_redirects=False)
+    assert r.status_code == 303
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "weekdaytenant")
+    conn.close()
+    assert tenant.schedule["daily"] == "30 3 * * 1-5"
+
+    r = client.get("/admin/tenants/weekdaytenant/edit")
+    assert r.status_code == 200
+    assert 'name="use_advanced_schedule" value="true" checked' in r.text
+    assert "30 3 * * 1-5" in r.text
 
 
 def test_admin_rule_toggle_persists(client):

@@ -47,8 +47,23 @@
   <input type="text" name="log_tz" value="{{ row.log_tz if row else 'UTC' }}">
   <label>Display timezone (used for the schedule and reports)</label>
   <input type="text" name="display_tz" value="{{ row.display_tz if row else 'UTC' }}">
-  <label>Daily schedule (cron, in the display timezone above)</label>
-  <input type="text" name="schedule_cron" value="{{ row.schedule_cron if row else '30 3 * * *' }}">
+  <label>Run daily at (in the display timezone above)</label>
+  <div style="display:flex;gap:6px;align-items:center">
+    <input type="number" name="schedule_hour" min="0" max="23" style="width:64px"
+           value="{{ row.schedule_hour if row else 3 }}">
+    <span class="muted">:</span>
+    <input type="number" name="schedule_minute" min="0" max="59" style="width:64px"
+           value="{{ row.schedule_minute if row else 30 }}">
+    <span class="muted" style="font-size:12px;margin-left:4px">24-hour time</span>
+  </div>
+  <label style="font-weight:normal;display:flex;align-items:center;gap:6px;margin-top:2px">
+    <input type="checkbox" name="use_advanced_schedule" value="true" {% if row and row.schedule_advanced %}checked{% endif %}>
+    Use a custom cron expression instead of a daily time
+  </label>
+  <input type="text" name="schedule_cron_advanced" placeholder="e.g. 30 3 * * 1-5 for weekdays only"
+         value="{{ row.schedule_cron_advanced if row else '' }}">
+  <p class="muted" style="margin:-4px 0 0;font-size:12px">Standard 5-field cron (minute hour day
+    month weekday). Only needed for anything other than "once a day", e.g. weekdays only.</p>
   <label><input type="checkbox" name="llm_enabled" value="true" {% if not row or row.llm_enabled %}checked{% endif %}> LLM triage enabled</label>
   <label><input type="checkbox" name="llm_redact" value="true" {% if not row or row.llm_redact %}checked{% endif %}> Redact users/IPs/hosts before sending to the LLM</label>
   <label>Digest email recipients (one per line)</label>

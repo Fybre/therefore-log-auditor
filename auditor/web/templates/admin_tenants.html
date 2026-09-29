@@ -9,7 +9,7 @@
   <tr>
     <td><a class="row-link" href="/admin/tenants/{{ t.id }}/edit">{{ t.id }}</a></td>
     <td class="muted">{{ t.base_url }}</td>
-    <td class="muted">{{ t.schedule.daily }} ({{ t.display_tz }})</td>
+    <td class="muted">{{ t.schedule.daily | humanize_schedule }} ({{ t.display_tz }})</td>
     <td class="muted">{{ "on" if t.llm.enabled else "off" }}</td>
     <td>{% if t.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}</td>
     <td style="text-align:right;white-space:nowrap">
