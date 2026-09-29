@@ -1,0 +1,19 @@
+# Copy to config/tenants.yaml. Secrets come from .env (THEREFORE_<ID>_USERNAME/_PASSWORD).
+tenants:
+  - id: craigdemo
+    base_url: https://craigdemo.thereforeonline.com
+    log_category_no: 1          # the Logfiles category
+    log_tz: UTC                 # timezone of timestamps inside the log files
+    display_tz: Australia/Sydney
+    schedule:
+      daily: "30 3 * * *"       # cron, in display_tz: shortly after the 17:00 UTC rotation
+    llm:
+      enabled: true
+      redact: true              # pseudonymise users/IPs/hosts before sending to the LLM
+    digest:
+      email_to: [craig@example.com]
+    # Activity that is expected; matching findings are downgraded to info (never deleted)
+    known:
+      users: [svc.logaudit]
+      ips: []
+      # windows: [{start: "2026-09-28T22:00:00+10:00", end: "2026-09-29T01:00:00+10:00", note: "testing"}]

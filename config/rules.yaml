@@ -1,0 +1,68 @@
+# Default rule thresholds. Override per tenant under `rules:` in tenants.yaml.
+# Severities: info | low | medium | high
+rules:
+  brute_force:
+    enabled: true
+    severity: high
+    window_minutes: 15
+    min_failures_per_user: 5
+    spray_window_minutes: 60
+    min_users_per_ip: 3
+    # Token expiry/format failures are client housekeeping, not password guessing.
+    ignore_result_codes: [148, 149, 154]
+
+  success_after_failures:
+    enabled: true
+    severity: high
+    lookback_minutes: 120
+    min_failures: 2
+    ignore_result_codes: [148, 149, 154]
+
+  new_entity:
+    enabled: true
+    severity: medium
+    admin_severity: high
+    ip_severity: low
+    # System/service principals that appear as users but aren't people
+    ignore_users: ["system", "nt authority\\system", "buffer cleanup", "$theanonymoususer", "$thewfsystem"]
+    warmup_days: 14          # need this much history before "first seen" means anything
+    admin_clients: ["Console", "Solution Designer"]
+    kinds: [user, ip, admin_client]
+
+  mass_delete:
+    enabled: true
+    severity: high
+    min_per_day: 200
+    baseline_days: 30
+    baseline_multiplier: 5
+
+  unplanned_restart:
+    enabled: true
+    severity: medium
+    window_minutes: 60
+    min_restarts: 3
+
+  log_gap:
+    enabled: true
+    severity: high
+    max_hours_without_server_log: 48
+
+  config_drift:
+    enabled: true
+    severity: high
+
+  recurring_failure:
+    enabled: true
+    severity: low
+    min_days: 3
+    lookback_days: 7
+    min_per_day: 1
+
+  retry_storm:
+    enabled: true
+    severity: medium
+    min_identical_per_day: 1000
+
+  licence_limit:
+    enabled: true
+    severity: high

@@ -1,0 +1,27 @@
+[project]
+name = "therefore-log-auditor"
+version = "0.1.0"
+description = "Multi-tenant auditing of Therefore Online server logs: rules first, LLM second."
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.31",
+  "psycopg[binary]>=3.1",
+  "pyyaml>=6.0",
+  "apscheduler>=3.10,<4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+auditor = "auditor.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["auditor*"]
+
+[tool.setuptools.package-data]
+auditor = ["migrations/*.sql"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

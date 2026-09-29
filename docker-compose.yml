@@ -1,0 +1,34 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: auditor
+      POSTGRES_USER: auditor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-auditor}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5433:5432"     # for local psql / debugging only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auditor -d auditor"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  auditor:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://auditor:${POSTGRES_PASSWORD:-auditor}@db:5432/auditor
+      TZ: Australia/Sydney
+    volumes:
+      - ./config:/app/config:ro
+      - ./reports:/app/reports
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command: ["serve"]
+
+volumes:
+  pgdata:

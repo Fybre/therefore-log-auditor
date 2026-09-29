@@ -1,0 +1,12 @@
+.env
+*.env
+!.env.example
+config/tenants.yaml
+__pycache__/
+*.pyc
+.pytest_cache/
+reports/*
+!reports/.gitkeep
+data/
+.venv/
+.claude/
