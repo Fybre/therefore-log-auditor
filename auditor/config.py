@@ -71,6 +71,7 @@ class Settings:
     llm_model: str
     smtp: dict[str, Any]
     reports_dir: Path
+    dashboard_url: str = ""   # e.g. https://audit.example.com - used to link back from digest emails
 
     def tenant(self, tenant_id: str) -> Tenant:
         for t in self.tenants:
@@ -104,10 +105,11 @@ def load_settings() -> Settings:
 
 
 def refresh_from_db(settings: Settings, conn: psycopg.Connection) -> None:
-    """Reload tenants + SMTP config from the database into an existing Settings in place, so
-    callers that already handed the object to a scheduler/pipeline see the update."""
+    """Reload tenants + SMTP + general config from the database into an existing Settings in
+    place, so callers that already handed the object to a scheduler/pipeline see the update."""
     settings.tenants = load_tenants(conn)
     settings.smtp = load_smtp(conn) or settings.smtp
+    settings.dashboard_url = load_general(conn).get("dashboard_url", "") or settings.dashboard_url
 
 
 # --- Tenants -----------------------------------------------------------------------------
@@ -255,5 +257,23 @@ def save_smtp(conn: psycopg.Connection, *, host: str, port: int, user: str,
     with conn.cursor() as cur:
         cur.execute(
             """INSERT INTO app_settings (key, value) VALUES ('smtp', %s)
+               ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""", (Jsonb(value),))
+    conn.commit()
+
+
+# --- App-wide settings (general) ------------------------------------------------------------
+
+def load_general(conn: psycopg.Connection) -> dict:
+    with conn.cursor() as cur:
+        cur.execute("SELECT value FROM app_settings WHERE key='general'")
+        row = cur.fetchone()
+    return dict(row["value"]) if row else {"dashboard_url": ""}
+
+
+def save_general(conn: psycopg.Connection, *, dashboard_url: str) -> None:
+    value = {"dashboard_url": dashboard_url.strip().rstrip("/")}
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO app_settings (key, value) VALUES ('general', %s)
                ON CONFLICT (key) DO UPDATE SET value=EXCLUDED.value""", (Jsonb(value),))
     conn.commit()

@@ -548,7 +548,7 @@ def register_routes(app: FastAPI) -> None:
     @app.get("/admin/smtp")
     def admin_smtp_form(request: Request, conn=Depends(db_conn)):
         smtp = cfg.load_smtp(conn) or {"host": "", "port": 587, "user": "", "from": "", "starttls": True}
-        return render(request, "admin_smtp.html", {"smtp": smtp, "saved": False})
+        return render(request, "admin_smtp.html", {"smtp": smtp, "saved": False, "general": cfg.load_general(conn)})
 
     @app.post("/admin/smtp")
     def admin_smtp_save(request: Request, conn=Depends(db_conn), host: str = Form(""),
@@ -557,7 +557,13 @@ def register_routes(app: FastAPI) -> None:
         cfg.save_smtp(conn, host=host, port=port, user=user, password=(password or None),
                       from_addr=from_addr, starttls=starttls)
         smtp = cfg.load_smtp(conn)
-        return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True})
+        return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True, "general": cfg.load_general(conn)})
+
+    @app.post("/admin/general")
+    def admin_general_save(request: Request, conn=Depends(db_conn), dashboard_url: str = Form("")):
+        cfg.save_general(conn, dashboard_url=dashboard_url)
+        smtp = cfg.load_smtp(conn) or {"host": "", "port": 587, "user": "", "from": "", "starttls": True}
+        return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True, "general": cfg.load_general(conn)})
 
     @app.post("/admin/smtp/test")
     def admin_smtp_test(request: Request, conn=Depends(db_conn), host: str = Form(""),
@@ -590,7 +596,8 @@ def register_routes(app: FastAPI) -> None:
         smtp_display = {"host": host, "port": port, "user": user, "from": from_addr,
                         "starttls": starttls, "password": password}
         return render(request, "admin_smtp.html", {
-            "smtp": smtp_display, "saved": False, "test_result": test_result, "test_to": test_to})
+            "smtp": smtp_display, "saved": False, "test_result": test_result, "test_to": test_to,
+            "general": cfg.load_general(conn)})
 
     # --- Admin: local accounts -----------------------------------------------------------
 

@@ -33,6 +33,13 @@ def gather(conn: psycopg.Connection, tenant: Tenant, since: dt.datetime) -> dict
                        ORDER BY array_position(ARRAY['high','medium','low','info'], severity), last_ts DESC""",
                     (tenant.id, since))
         findings = cur.fetchall()
+        # Everything still open, regardless of whether it changed in this run - `counts` below
+        # only covers what's in `findings` (today's new/changed), so without this the digest
+        # can only ever say what happened today, never what's still outstanding overall.
+        cur.execute("""SELECT severity, count(*) AS n FROM findings
+                       WHERE tenant_id=%s AND status='open' GROUP BY 1""", (tenant.id,))
+        open_counts = {s: 0 for s in SEV_ORDER}
+        open_counts.update({r["severity"]: r["n"] for r in cur.fetchall()})
         cur.execute("""SELECT application, max(generated) AS generated, max(last_ts) AS last_event,
                               max(fetched_at) AS fetched
                        FROM log_files WHERE tenant_id=%s AND status='parsed' GROUP BY 1 ORDER BY 1""", (tenant.id,))
@@ -45,25 +52,37 @@ def gather(conn: psycopg.Connection, tenant: Tenant, since: dt.datetime) -> dict
         errors = cur.fetchone()["n"]
     counts = {s: sum(1 for f in findings if f["severity"] == s) for s in SEV_ORDER}
     return {"findings": findings, "freshness": freshness, "activity": activity, "counts": counts,
-            "file_errors": errors}
+            "open_counts": open_counts, "file_errors": errors}
 
 
-def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict) -> tuple[str, str, str]:
+def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
+          dashboard_url: str = "") -> tuple[str, str, str]:
+    dashboard_url = (dashboard_url or "").rstrip("/")
     tz = ZoneInfo(tenant.display_tz)
     today = dt.datetime.now(tz).strftime("%a %d %b %Y")
     c = data["counts"]
+    oc = data.get("open_counts") or {s: 0 for s in SEV_ORDER}
     subject = f"[Therefore audit] {tenant.id} {today}: {c['high']} high, {c['medium']} medium"
     if summary:
         subject += f" - {summary['headline'][:80]}"
 
+    findings_url = f"{dashboard_url}/t/{tenant.id}/findings" if dashboard_url else None
+
     def local(ts):
         return ts.astimezone(tz).strftime("%d %b %H:%M") if ts else "-"
+
+    def finding_url(f):
+        return f"{dashboard_url}/t/{tenant.id}/findings/{f['id']}" if dashboard_url else None
 
     # Markdown
     md = [f"# Therefore audit - {tenant.id} - {today}", ""]
     if summary:
         md += [f"**{summary['headline']}**", "", summary["summary"], ""]
-    md += [f"Findings updated this run: {c['high']} high, {c['medium']} medium, {c['low']} low, {c['info']} info.", ""]
+    md += [f"**Currently open: {oc['high']} high, {oc['medium']} medium, {oc['low']} low** "
+           f"(all-time backlog, not just today) - updated this run: {c['high']} high, "
+           f"{c['medium']} medium, {c['low']} low, {c['info']} info.", ""]
+    if findings_url:
+        md += [f"[Open the dashboard]({findings_url}) - filter, review, and manage known activity there.", ""]
     visible = [f for f in data["findings"] if f["severity"] != "info"]
     for group in _incident_groups(visible):
         head = min(group, key=lambda f: SEV_ORDER[f["severity"]])
@@ -71,7 +90,9 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict) ->
         rules = ", ".join(sorted({f["rule_id"] for f in group}))
         span_start = min(f["first_ts"] for f in group)
         span_end = max(f["last_ts"] for f in group)
-        md.append(f"## [{head['severity'].upper()}] {titles[0]}")
+        url = finding_url(head)
+        heading = f"[{titles[0]}]({url})" if url else titles[0]
+        md.append(f"## [{head['severity'].upper()}] {heading}")
         md.append(f"{local(span_start)} to {local(span_end)} ({tenant.display_tz}) - rule(s) `{rules}`"
                   + (f", LLM verdict: {head['llm_verdict']}" if head["llm_verdict"] else ""))
         if len(group) > 1:
@@ -99,10 +120,13 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict) ->
         actions = "".join(f"<li>{html.escape(a)}</li>" for a in (head["llm_actions"] or []))
         members_html = ("<ul style='margin:4px 0 0 18px;padding:0'>"
                          + "".join(f"<li>{html.escape(t)}</li>" for t in titles) + "</ul>") if len(group) > 1 else ""
+        url = finding_url(head)
+        title_html = (f'<a href="{html.escape(url)}" style="color:#101828;text-decoration:underline">'
+                      f'{html.escape(titles[0])}</a>') if url else html.escape(titles[0])
         rows.append(f"""
 <tr><td style="padding:12px 0;border-top:1px solid #eaecf0">
   <span style="color:#fff;background:{SEV_COLOUR[head['severity']]};border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600">{head['severity'].upper()}</span>
-  <strong style="margin-left:6px">{html.escape(titles[0])}</strong>
+  <strong style="margin-left:6px">{title_html}</strong>
   <div style="color:#667085;font-size:12px;margin-top:4px">{local(span_start)} to {local(span_end)} &middot; {html.escape(rules)}
   {('&middot; verdict: ' + html.escape(head['llm_verdict'])) if head['llm_verdict'] else ''}</div>
   {members_html}
@@ -112,11 +136,16 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict) ->
     fresh = "".join(f"<li>{html.escape(r['application'])}: last file {r['generated']}, last event {local(r['last_event'])}</li>"
                     for r in data["freshness"])
     info_html = "".join(f"<li>{html.escape(f['title'])} <span style='color:#98a2b3'>({html.escape(f['suppressed_by'] or f['llm_verdict'] or '')})</span></li>" for f in info)
+    dashboard_link_html = (f'<p style="margin:8px 0 16px"><a href="{html.escape(findings_url)}" '
+                           f'style="color:#101828;font-weight:600">Open the dashboard &rarr;</a></p>') if findings_url else ""
     body = f"""<!doctype html><html><body style="font-family:-apple-system,Segoe UI,Arial,sans-serif;color:#101828;max-width:720px;margin:0 auto;padding:16px">
 <h2 style="margin:0 0 4px">Therefore audit &middot; {html.escape(tenant.id)}</h2>
 <div style="color:#667085">{today}</div>
 {('<p style="font-size:16px;margin:16px 0 4px"><strong>' + html.escape(summary['headline']) + '</strong></p><p style="margin:0 0 12px">' + html.escape(summary['summary']) + '</p>') if summary else ''}
-<p>{c['high']} high &middot; {c['medium']} medium &middot; {c['low']} low &middot; {c['info']} info</p>
+<p><strong>Currently open: {oc['high']} high, {oc['medium']} medium, {oc['low']} low</strong>
+<span style="color:#667085">(all-time backlog, not just today)</span></p>
+<p style="color:#667085;margin:0 0 8px">Updated this run: {c['high']} high &middot; {c['medium']} medium &middot; {c['low']} low &middot; {c['info']} info</p>
+{dashboard_link_html}
 <table style="width:100%;border-collapse:collapse">{''.join(rows) or '<tr><td>No findings need attention.</td></tr>'}</table>
 {('<h3>Expected / suppressed</h3><ul>' + info_html + '</ul>') if info_html else ''}
 <h3>Log freshness</h3><ul>{fresh}</ul>

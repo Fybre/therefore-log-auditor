@@ -32,4 +32,15 @@
     Password blank tests and saves using the already-saved password.</p>
   <button type="submit" style="align-self:flex-start;padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
 </form>
+
+<form class="card" method="post" action="/admin/general" style="display:flex;flex-direction:column;gap:10px;max-width:420px">
+  <h2 style="margin-top:0">Dashboard link</h2>
+  <label>Dashboard URL</label>
+  <input type="text" name="dashboard_url" placeholder="https://audit.example.com"
+         value="{{ general.dashboard_url if general else '' }}">
+  <p class="muted" style="margin:-4px 0 0;font-size:12px">Used to add a "View in dashboard" link
+    to digest emails, and to link each finding mentioned in an email straight to it. Leave blank
+    to omit the link (emails still work, they just won't link anywhere).</p>
+  <button type="submit" style="align-self:flex-start;padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+</form>
 {% endblock %}

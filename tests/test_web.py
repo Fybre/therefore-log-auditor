@@ -155,6 +155,19 @@ def test_admin_rule_toggle_persists(client):
     assert overrides["mass_delete"]["enabled"] is False
 
 
+def test_admin_general_dashboard_url_save_and_reload(client):
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.post("/admin/general", data={"dashboard_url": "https://audit.example.com/"})
+    assert r.status_code == 200
+    assert "https://audit.example.com" in r.text
+    conn = db.connect(DB)
+    general = cfg.load_general(conn)
+    conn.close()
+    assert general["dashboard_url"] == "https://audit.example.com"   # trailing slash stripped
+
+
 def test_admin_smtp_save_and_reload(client):
     from auditor import config as cfg
     from auditor import db
