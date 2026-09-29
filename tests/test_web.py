@@ -116,6 +116,44 @@ def test_admin_create_edit_delete_tenant(client):
     assert "newtenant" not in r.text
 
 
+def test_admin_tenant_create_rejects_invalid_timezone(client):
+    """A timezone abbreviation like "AEST" isn't a valid IANA zone - if it were saved, every
+    page rendering that tenant's timestamps (including the shared tenant list) would 500. Must
+    be rejected with a form error instead, and not saved to the DB."""
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.post("/admin/tenants/new", data={
+        "id": "badtz", "base_url": "https://badtz.thereforeonline.com",
+        "username": "svc", "password": "secret123", "log_category_no": "1",
+        "log_tz": "UTC", "display_tz": "AEST", "schedule_hour": "3", "schedule_minute": "30",
+        "digest_email_to": "", "enabled": "true"})
+    assert r.status_code == 400
+    assert "a valid time zone" in r.text
+    assert "AEST" in r.text
+
+    conn = db.connect(DB)
+    assert cfg.get_tenant_row(conn, "badtz") is None
+    conn.close()
+
+
+def test_admin_tenant_update_rejects_invalid_timezone(client):
+    from auditor import config as cfg
+    from auditor import db
+    _login(client)
+    r = client.post("/admin/tenants/webtest/edit", data={
+        "base_url": "https://webtest.thereforeonline.com", "username": "svc",
+        "log_tz": "AEST", "display_tz": "UTC", "schedule_hour": "3", "schedule_minute": "30",
+        "digest_email_to": "", "enabled": "true"})
+    assert r.status_code == 400
+    assert "a valid time zone" in r.text
+
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    conn.close()
+    assert tenant.log_tz == "UTC"   # unchanged - the bad value was rejected before saving
+
+
 def test_admin_tenant_advanced_schedule(client):
     from auditor import config as cfg
     from auditor import db

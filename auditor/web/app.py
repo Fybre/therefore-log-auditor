@@ -26,6 +26,18 @@ from . import auth
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 STATIC_DIR = Path(__file__).parent / "static"
 REVIEW_STATUSES = ["open", "acknowledged", "resolved", "false_positive"]
+
+# A curated shortlist for the tenant form's timezone <datalist> (autocomplete hint only - the
+# real validation is against the full IANA database, see _valid_timezone()). Must be full IANA
+# names, never abbreviations like "AEST" - those aren't valid zoneinfo keys and will be rejected.
+COMMON_TIMEZONES = [
+    "UTC",
+    "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane", "Australia/Perth",
+    "Australia/Adelaide", "Australia/Darwin", "Australia/Hobart",
+    "Pacific/Auckland", "Asia/Singapore", "Asia/Tokyo", "Asia/Kolkata", "Asia/Hong_Kong",
+    "Europe/London", "Europe/Paris", "Europe/Berlin",
+    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+]
 SEV_ORDER = {"high": 0, "medium": 1, "low": 2, "info": 3}
 
 
@@ -76,6 +88,17 @@ def db_conn(request: Request):
         conn.close()
 
 
+def _invalid_timezone(tz: str) -> bool:
+    """True if `tz` isn't a real IANA zone - e.g. an abbreviation like "AEST", which isn't a
+    valid zoneinfo key and would 500 every page that renders a timestamp for that tenant
+    (any tenant's bad value breaks the shared tenant list page, not just that tenant's own)."""
+    try:
+        ZoneInfo(tz)
+        return False
+    except Exception:
+        return True
+
+
 def _actor(request: Request) -> str:
     user = auth.current_user(request)
     return user.username if user else "unknown"
@@ -119,8 +142,9 @@ def register_routes(app: FastAPI) -> None:
     templates: Jinja2Templates = app.state.templates
 
     def render(request, name, ctx, status_code: int = 200):
-        return templates.TemplateResponse(request, name, {"user": auth.current_user(request), **ctx},
-                                          status_code=status_code)
+        return templates.TemplateResponse(request, name, {
+            "user": auth.current_user(request), "common_timezones": COMMON_TIMEZONES, **ctx},
+            status_code=status_code)
 
     # --- Auth --------------------------------------------------------------------------
 
@@ -531,6 +555,19 @@ def register_routes(app: FastAPI) -> None:
         if cfg.get_tenant_row(conn, id):
             return render(request, "admin_tenant_form.html",
                           {"t": None, "row": None, "error": f"Tenant '{id}' already exists"}, status_code=400)
+        bad_tz = next((tz for tz in (log_tz, display_tz) if _invalid_timezone(tz)), None)
+        if bad_tz:
+            row = {"base_url": base_url, "therefore_username": username, "password": password,
+                   "tenant_name_override": tenant_name_override, "log_category_no": log_category_no,
+                   "log_tz": log_tz, "display_tz": display_tz, "schedule_hour": schedule_hour,
+                   "schedule_minute": schedule_minute, "schedule_advanced": use_advanced_schedule,
+                   "schedule_cron_advanced": schedule_cron_advanced, "llm_enabled": llm_enabled,
+                   "llm_redact": llm_redact, "digest_email_to": _split_emails(digest_email_to),
+                   "enabled": enabled}
+            return render(request, "admin_tenant_form.html", {
+                "t": None, "row": row, "new_id": id,
+                "error": f"'{bad_tz}' isn't a valid time zone - use a full name like "
+                         f"Australia/Sydney, not an abbreviation like AEST."}, status_code=400)
         schedule_cron = _compute_schedule_cron(schedule_hour, schedule_minute, use_advanced_schedule, schedule_cron_advanced)
         cfg.save_tenant(conn, id=id, base_url=base_url, username=username, password=password,
                         tenant_name_override=tenant_name_override or None,
@@ -554,6 +591,19 @@ def register_routes(app: FastAPI) -> None:
                              digest_email_to: str = Form(""), digest_only_on_new: bool = Form(False),
                              enabled: bool = Form(False)):
         existing = cfg.get_tenant(conn, tenant_id)
+        bad_tz = next((tz for tz in (log_tz, display_tz) if _invalid_timezone(tz)), None)
+        if bad_tz:
+            row = {"base_url": base_url, "therefore_username": username,
+                   "tenant_name_override": tenant_name_override, "log_category_no": log_category_no,
+                   "log_tz": log_tz, "display_tz": display_tz, "schedule_hour": schedule_hour,
+                   "schedule_minute": schedule_minute, "schedule_advanced": use_advanced_schedule,
+                   "schedule_cron_advanced": schedule_cron_advanced, "llm_enabled": llm_enabled,
+                   "llm_redact": llm_redact, "digest_email_to": _split_emails(digest_email_to),
+                   "enabled": enabled}
+            return render(request, "admin_tenant_form.html", {
+                "t": tenant_id, "row": row,
+                "error": f"'{bad_tz}' isn't a valid time zone - use a full name like "
+                         f"Australia/Sydney, not an abbreviation like AEST."}, status_code=400)
         schedule_cron = _compute_schedule_cron(schedule_hour, schedule_minute, use_advanced_schedule, schedule_cron_advanced)
         cfg.save_tenant(conn, id=tenant_id, base_url=base_url, username=username,
                         password=(password or None), tenant_name_override=tenant_name_override or None,

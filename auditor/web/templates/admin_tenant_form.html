@@ -44,9 +44,17 @@
   <label>Logfiles category number</label>
   <input type="number" name="log_category_no" value="{{ row.log_category_no if row else 1 }}">
   <label>Log timestamp timezone (timezone inside the log files, usually UTC)</label>
-  <input type="text" name="log_tz" value="{{ row.log_tz if row else 'UTC' }}">
+  <input type="text" name="log_tz" value="{{ row.log_tz if row else 'UTC' }}"
+         placeholder="e.g. UTC or Australia/Sydney" list="tz-list">
   <label>Display timezone (used for the schedule and reports)</label>
-  <input type="text" name="display_tz" value="{{ row.display_tz if row else 'UTC' }}">
+  <input type="text" name="display_tz" value="{{ row.display_tz if row else 'UTC' }}"
+         placeholder="e.g. UTC or Australia/Sydney" list="tz-list">
+  <p class="muted" style="margin:-4px 0 0;font-size:12px">Must be a full IANA time zone name, not
+    an abbreviation - <code>Australia/Sydney</code> or <code>Australia/Brisbane</code>, not
+    <code>AEST</code> (abbreviations like that aren't valid and will be rejected on save).</p>
+  <datalist id="tz-list">
+    {% for tz in common_timezones %}<option value="{{ tz }}">{% endfor %}
+  </datalist>
   <label>Run daily at (in the display timezone above)</label>
   <div style="display:flex;gap:6px;align-items:center">
     <input type="number" name="schedule_hour" min="0" max="23" style="width:64px"
