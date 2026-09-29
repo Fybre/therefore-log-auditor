@@ -1,4 +1,4 @@
-"""Command line: auditor {migrate,run,backfill,serve,findings}"""
+"""Command line: auditor {migrate,run,backfill,serve,web,findings}"""
 from __future__ import annotations
 
 import argparse
@@ -28,6 +28,10 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--llm", action="store_true", help="also triage the findings (costs tokens)")
 
     sub.add_parser("serve", help="run the scheduler (each tenant's schedule.daily cron)")
+
+    w = sub.add_parser("web", help="run the findings dashboard")
+    w.add_argument("--host", default="0.0.0.0")
+    w.add_argument("--port", type=int, default=8080)
 
     f = sub.add_parser("findings", help="list recent findings")
     f.add_argument("--tenant", required=True)
@@ -66,6 +70,12 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "serve":
         from .scheduler import serve
         serve(settings)
+        return 0
+
+    if a.cmd == "web":
+        import uvicorn
+        from .web.app import create_app
+        uvicorn.run(create_app(settings), host=a.host, port=a.port)
         return 0
 
     if a.cmd == "findings":

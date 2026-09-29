@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ tenant.id }} findings - Therefore Log Auditor{% endblock %}
+{% block content %}
+<h1>{{ tenant.id }} &middot; findings</h1>
+<form class="filters" method="get">
+  <select name="min_severity" onchange="this.form.submit()">
+    {% for s in ["high", "medium", "low", "info"] %}
+    <option value="{{ s }}" {% if s == min_severity %}selected{% endif %}>{{ s }}+ severity</option>
+    {% endfor %}
+  </select>
+  <select name="status" onchange="this.form.submit()">
+    <option value="" {% if not status %}selected{% endif %}>any status</option>
+    {% for s in statuses %}
+    <option value="{{ s }}" {% if s == status %}selected{% endif %}>{{ s }}</option>
+    {% endfor %}
+  </select>
+  <select name="days" onchange="this.form.submit()">
+    {% for d in [7, 30, 90, 365] %}
+    <option value="{{ d }}" {% if d == days %}selected{% endif %}>last {{ d }} days</option>
+    {% endfor %}
+  </select>
+  <noscript><button type="submit">Filter</button></noscript>
+</form>
+<table>
+  <tr><th>Severity</th><th>Title</th><th>Rule</th><th>Status</th><th>Verdict</th><th>Last seen</th></tr>
+  {% for f in findings %}
+  <tr>
+    <td><span class="badge {{ f.severity }}">{{ f.severity }}</span></td>
+    <td>
+      <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ f.id }}">{{ f.title }}</a>
+      {% if f.incident_size and f.incident_size > 1 %}<span class="pill">{{ f.incident_size }} related</span>{% endif %}
+      {% if f.suppressed_by %}<span class="pill">{{ f.suppressed_by }}</span>{% endif %}
+    </td>
+    <td class="muted">{{ f.rule_id }}</td>
+    <td>{{ f.status }}</td>
+    <td class="muted">{{ f.llm_verdict or "-" }}</td>
+    <td class="muted">{{ f.last_ts | local_time(tenant.display_tz) }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No findings match these filters.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

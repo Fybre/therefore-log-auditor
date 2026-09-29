@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}{{ tenant.id }} known activity - Therefore Log Auditor{% endblock %}
+{% block content %}
+<p><a class="row-link muted" href="/t/{{ tenant.id }}/findings">&larr; {{ tenant.id }} findings</a></p>
+<h1>{{ tenant.id }} &middot; known activity</h1>
+<p class="muted">Matching findings are downgraded to info, never deleted. Read-only here - edit
+  <code>config/tenants.yaml</code> and restart to change this (a managed editor is a future step).</p>
+
+<div class="card">
+  <h2>Known users</h2>
+  {% if known.users %}<ul>{% for u in known.users %}<li>{{ u }}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">None configured.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Known IPs</h2>
+  {% if known.ips %}<ul>{% for ip in known.ips %}<li>{{ ip }}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">None configured.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Change windows</h2>
+  {% if known.windows %}
+  <ul>{% for w in known.windows %}<li>{{ w.start }} to {{ w.end }}: {{ w.note }}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">None configured.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Notes</h2>
+  {% if known.notes %}<ul>{% for n in known.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">None configured.</p>{% endif %}
+</div>
+{% endblock %}

@@ -227,12 +227,20 @@ def _evidence(conn, tenant_id: str, ids: list[int], rd: Redactor, limit: int = 2
 
 def _past_verdicts(conn, tenant_id: str, rule_id: str, exclude_id: int, rd: Redactor) -> list[str]:
     with conn.cursor() as cur:
-        cur.execute("""SELECT title, status, llm_verdict, suppressed_by FROM findings
+        cur.execute("""SELECT title, status, llm_verdict, suppressed_by, reviewed_by, reviewed_note
+                       FROM findings
                        WHERE tenant_id=%s AND rule_id=%s AND id<>%s
                          AND (llm_verdict IS NOT NULL OR status <> 'open')
                        ORDER BY last_ts DESC LIMIT 5""", (tenant_id, rule_id, exclude_id))
-        return [f"{rd.text(r['title'])} -> verdict={r['llm_verdict']}, status={r['status']}"
-                + (f", suppressed: {r['suppressed_by']}" if r["suppressed_by"] else "") for r in cur.fetchall()]
+        out = []
+        for r in cur.fetchall():
+            line = f"{rd.text(r['title'])} -> verdict={r['llm_verdict']}, status={r['status']}"
+            if r["suppressed_by"]:
+                line += f", suppressed: {r['suppressed_by']}"
+            if r["reviewed_note"]:
+                line += f", human reviewer ({r['reviewed_by']}) said: {rd.text(r['reviewed_note'])}"
+            out.append(line)
+        return out
 
 
 def triage(conn: psycopg.Connection, settings: Settings, tenant: Tenant, finding_ids: list[int],

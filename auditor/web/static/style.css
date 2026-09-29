@@ -1,0 +1,59 @@
+:root { color-scheme: light; }
+body {
+  font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+  color: #101828;
+  background: #f9fafb;
+  margin: 0;
+}
+header {
+  background: #101828;
+  color: #fff;
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+header a { color: #fff; text-decoration: none; font-weight: 600; }
+header .user { color: #98a2b3; font-size: 13px; }
+header form { display: inline; margin-left: 12px; }
+header button {
+  background: none; border: 1px solid #475467; color: #d0d5dd; border-radius: 4px;
+  padding: 4px 10px; cursor: pointer; font-size: 13px;
+}
+main { max-width: 960px; margin: 0 auto; padding: 24px; }
+h1 { font-size: 20px; margin: 0 0 16px; }
+h2 { font-size: 16px; margin: 24px 0 8px; }
+table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; }
+th, td { text-align: left; padding: 10px 12px; border-top: 1px solid #eaecf0; font-size: 14px; }
+th { background: #f2f4f7; font-size: 12px; text-transform: uppercase; color: #667085; }
+tr:hover td { background: #f9fafb; }
+a.row-link { color: #101828; text-decoration: none; }
+a.row-link:hover { text-decoration: underline; }
+.badge {
+  display: inline-block; color: #fff; border-radius: 4px; padding: 2px 7px;
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+}
+.badge.high { background: #b42318; }
+.badge.medium { background: #b54708; }
+.badge.low { background: #475467; }
+.badge.info { background: #98a2b3; }
+.pill {
+  display: inline-block; border: 1px solid #d0d5dd; border-radius: 12px; padding: 1px 9px;
+  font-size: 11px; color: #475467; background: #fff;
+}
+.card { background: #fff; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; }
+.muted { color: #667085; }
+.filters { margin-bottom: 12px; font-size: 13px; }
+.filters select, .filters input { margin-right: 12px; }
+form.review { display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+form.review select, form.review textarea { font-family: inherit; font-size: 14px; padding: 6px; }
+form.review textarea { flex: 1; min-width: 240px; min-height: 40px; }
+form.review button { padding: 6px 14px; background: #101828; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+pre.evidence {
+  background: #101828; color: #d0d5dd; padding: 12px; border-radius: 6px; overflow-x: auto;
+  font-size: 12px; line-height: 1.6;
+}
+.login-box { max-width: 320px; margin: 80px auto; }
+.login-box input { width: 100%; padding: 8px; margin: 6px 0 14px; box-sizing: border-box; }
+.login-box button { width: 100%; padding: 8px; background: #101828; color: #fff; border: none; border-radius: 4px; }
+.error { color: #b42318; font-size: 13px; }

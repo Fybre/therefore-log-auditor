@@ -50,14 +50,22 @@ Verified in the cloud dev environment (Python 3.11 + Postgres 16):
 ## Run it
 
 ```bash
-docker compose up -d --build                                                    # Postgres + scheduler
+docker compose up -d --build                                                    # Postgres + scheduler + dashboard
 docker compose run --rm auditor backfill --tenant craigdemo --since 2023-09-01   # load history, rules only
 docker compose run --rm auditor run --tenant craigdemo                          # full daily run now
 docker compose run --rm auditor findings --tenant craigdemo --days 30 --min-severity medium
 open reports/craigdemo/                                                          # HTML/MD digests
+open http://localhost:8080                                                       # dashboard (login: AUDITOR_WEB_USER/PASSWORD)
 ```
 Local dev without Docker: `pip install -e '.[dev]'`, set `DATABASE_URL`, then `auditor migrate`
 and the same commands. Postgres from compose is exposed on `127.0.0.1:5433` (user/db `auditor`).
+
+**Tests use a separate `auditor_test` database, never the compose `auditor` one** - set
+`TEST_DATABASE_URL=postgresql://auditor:auditor@db:5432/auditor_test` (create the DB once with
+`docker compose exec db psql -U auditor -d auditor -c "CREATE DATABASE auditor_test;"`).
+Every DB-backed test does `DROP SCHEMA public CASCADE` first - pointing `TEST_DATABASE_URL` at
+the real `auditor` DB wipes real findings/events (this happened once, on 29 Sep; craigdemo's
+findings were recoverable by re-running `auditor run`, but don't repeat the mistake).
 
 Config:
 - `.env` (gitignored). It holds `LLM_BASE_URL`, `LLM_API_KEY` (OpenRouter key, $250 limit),
@@ -85,7 +93,11 @@ auditor/
   digest.py      gather/render HTML + Markdown, write reports/<tenant>/, SMTP send
   pipeline.py    run_tenant(): collect -> snapshot -> rules (UTC-midnight-aligned window) -> triage -> digest
   scheduler.py   APScheduler: daily cron per tenant + hourly catch-up (6h) until the day's log arrives
-  cli.py         auditor migrate | run | backfill | serve | findings
+  cli.py         auditor migrate | run | backfill | serve | web | findings
+  web/app.py     FastAPI dashboard: tenants index, findings queue, finding detail + evidence,
+                 known-activity (read-only), review (verdict feedback: status + note)
+  web/auth.py    Session-cookie login, single admin account from env - see docstring for the
+                 intended Entra ID/OIDC swap point (replace authenticate() + /login route only)
 ```
 DB tables: `log_files`, `events`, `findings`, `settings_snapshots`, `runs`, `schema_migrations`.
 
@@ -192,10 +204,24 @@ Behaviours worth knowing:
    pushed and tracked as `origin/main`. Checked git history first — no real secrets were ever
    committed (`.env`/`config/tenants.yaml` were always gitignored, only placeholder values exist).
 7. **Phase 2** (per the design doc):
-   - web dashboard (FastAPI + simple UI; findings queue, evidence, known-activity management, verdict feedback)
+   - ~~web dashboard~~ Started 29 Sep: FastAPI app at `auditor/web/`, runs as the `web` compose
+     service on :8080. Findings queue (`/t/{tenant}/findings`, filterable by severity/status/days),
+     finding detail with evidence lines and incident cross-links (`/t/{tenant}/findings/{id}`),
+     known-activity display (read-only), and verdict feedback (a status + note per finding, saved
+     to `findings.reviewed_by/reviewed_note/reviewed_at` and fed back into future LLM triage of
+     that rule via `llm._past_verdicts`). Login is a single admin account from
+     `AUDITOR_WEB_USER`/`AUDITOR_WEB_PASSWORD`/`AUDITOR_WEB_SECRET` in `.env` - a deliberate
+     placeholder, see `auditor/web/auth.py`'s docstring for the Entra ID/OIDC swap point (only
+     `authenticate()` and the `/login` route need replacing; every page already reads identity via
+     `current_user()`). Tested via `tests/test_web.py` (FastAPI TestClient) and manually against
+     live craigdemo data through the compose `web` service - review-submit round-trip confirmed
+     working. Not yet done: known-activity editing in the UI (currently read-only, edit
+     `tenants.yaml` + restart), dashboard-level incident-group rendering to match the digest
+     (the findings table shows an "N related" pill but still lists each finding as its own row),
+     and real auth.
    - Teams webhook alerts for High
    - daily PDF report saved into a Therefore "Audit Reports" category
-   - Entra ID sign-in
+   - Entra ID sign-in (see the dashboard note above - the swap point already exists)
    - Postgres row-level security per tenant
    - add Sumitomo as a second tenant
 8. Later: Migrate/Content Connector-specific rules (disk space "MB free", fetch/process errors),

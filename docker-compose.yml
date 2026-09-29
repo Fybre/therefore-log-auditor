@@ -30,5 +30,21 @@ services:
     restart: unless-stopped
     command: ["serve"]
 
+  web:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://auditor:${POSTGRES_PASSWORD:-auditor}@db:5432/auditor
+      TZ: Australia/Sydney
+    volumes:
+      - ./config:/app/config:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command: ["web"]
+
 volumes:
   pgdata:

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ f.title }} - Therefore Log Auditor{% endblock %}
+{% block content %}
+<p><a class="row-link muted" href="/t/{{ tenant.id }}/findings">&larr; {{ tenant.id }} findings</a></p>
+<h1><span class="badge {{ f.severity }}">{{ f.severity }}</span> {{ f.title }}</h1>
+<p class="muted">
+  rule <code>{{ f.rule_id }}</code> &middot;
+  {{ f.first_ts | local_time(tenant.display_tz) }} to {{ f.last_ts | local_time(tenant.display_tz) }}
+  &middot; status: {{ f.status }}
+  {% if f.suppressed_by %}&middot; suppressed: {{ f.suppressed_by }}{% endif %}
+</p>
+
+{% if f.llm_verdict %}
+<div class="card">
+  <h2>LLM triage &middot; {{ f.llm_verdict }} ({{ (f.llm_confidence * 100) | round | int }}% confidence, {{ f.llm_model }})</h2>
+  <p>{{ f.llm_explanation }}</p>
+  {% if f.llm_actions %}
+  <ul>{% for a in f.llm_actions %}<li>{{ a }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if incident %}
+<div class="card">
+  <h2>Related findings (same incident)</h2>
+  <ul>
+    {% for i in incident %}
+    <li><span class="badge {{ i.severity }}">{{ i.severity }}</span>
+      <a class="row-link" href="/t/{{ tenant.id }}/findings/{{ i.id }}">{{ i.title }}</a>
+      <span class="muted">({{ i.rule_id }})</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Evidence ({{ evidence | length }} lines)</h2>
+  {% if evidence %}
+  <pre class="evidence">{% for e in evidence %}{{ e.ts | local_time(tenant.display_tz) }} | {{ e.username or "-" }} | {{ e.host or "-" }} | {{ e.ip or "-" }} | {{ e.action }} | code={{ e.result_code }}{% if e.obj_doc_no %} | doc={{ e.obj_doc_no }}{% endif %}{% if e.category %} | cat={{ e.category }}{% endif %}{% if e.client %} | client={{ e.client }}{% endif %}{% if e.message %} | {{ e.message }}{% endif %}
+{% endfor %}</pre>
+  {% else %}
+  <p class="muted">No evidence lines recorded.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Review</h2>
+  {% if f.reviewed_by %}
+  <p class="muted">Last reviewed by {{ f.reviewed_by }} at {{ f.reviewed_at | local_time(tenant.display_tz) }}
+    {% if f.reviewed_note %}: {{ f.reviewed_note }}{% endif %}</p>
+  {% endif %}
+  <form class="review" method="post" action="/t/{{ tenant.id }}/findings/{{ f.id }}/review">
+    <select name="status">
+      {% for s in statuses %}
+      <option value="{{ s }}" {% if s == f.status %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <textarea name="note" placeholder="Note (optional) - fed back to the LLM for future triage of this rule"></textarea>
+    <button type="submit">Save review</button>
+  </form>
+</div>
+{% endblock %}

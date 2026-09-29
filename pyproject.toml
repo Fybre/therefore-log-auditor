@@ -8,10 +8,15 @@ dependencies = [
   "psycopg[binary]>=3.1",
   "pyyaml>=6.0",
   "apscheduler>=3.10,<4",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "jinja2>=3.1",
+  "itsdangerous>=2.1",
+  "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
 auditor = "auditor.cli:main"
@@ -20,7 +25,7 @@ auditor = "auditor.cli:main"
 include = ["auditor*"]
 
 [tool.setuptools.package-data]
-auditor = ["migrations/*.sql"]
+auditor = ["migrations/*.sql", "web/templates/*.html", "web/static/*"]
 
 [build-system]
 requires = ["setuptools>=68"]

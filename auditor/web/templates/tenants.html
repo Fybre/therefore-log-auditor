@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Tenants - Therefore Log Auditor{% endblock %}
+{% block content %}
+<h1>Tenants</h1>
+<table>
+  <tr><th>Tenant</th><th>Open high</th><th>Open medium</th><th>Open low</th><th>Last finding</th><th></th></tr>
+  {% for r in rows %}
+  <tr>
+    <td>{{ r.tenant.id }}</td>
+    <td>{% if r.high %}<span class="badge high">{{ r.high }}</span>{% else %}0{% endif %}</td>
+    <td>{% if r.medium %}<span class="badge medium">{{ r.medium }}</span>{% else %}0{% endif %}</td>
+    <td>{{ r.low or 0 }}</td>
+    <td class="muted">{{ r.last_finding | local_time(r.tenant.display_tz) }}</td>
+    <td>
+      <a class="row-link" href="/t/{{ r.tenant.id }}/findings">Findings</a> &middot;
+      <a class="row-link" href="/t/{{ r.tenant.id }}/known">Known activity</a>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
