@@ -176,7 +176,9 @@ Behaviours worth knowing:
    "Audit Reports" category) and replace Craig's credentials in `.env`. Test whether a non-admin
    account can read `GetSettings`. Several keys expose infrastructure (SQL server, storage paths,
    SMTP, OAuth config), which may need raising with Therefore.
-6. **GitHub.** Create a repo (e.g. `Fybre/therefore-log-auditor`), add the remote and push.
+6. ~~**GitHub.**~~ Done 29 Sep: https://github.com/Fybre/therefore-log-auditor (public), `main`
+   pushed and tracked as `origin/main`. Checked git history first — no real secrets were ever
+   committed (`.env`/`config/tenants.yaml` were always gitignored, only placeholder values exist).
 7. **Phase 2** (per the design doc):
    - web dashboard (FastAPI + simple UI; findings queue, evidence, known-activity management, verdict feedback)
    - Teams webhook alerts for High
