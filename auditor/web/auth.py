@@ -54,8 +54,8 @@ def bootstrap_first_admin(conn: psycopg.Connection) -> None:
 
 def current_user(request: Request) -> User | None:
     session_user = request.session.get("user")
-    if not session_user:
-        return None
+    if not isinstance(session_user, dict) or "id" not in session_user:
+        return None   # missing, or an old-format session (pre-local-accounts) - just log out
     return User(id=session_user["id"], username=session_user["username"])
 
 
