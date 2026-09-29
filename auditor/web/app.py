@@ -192,6 +192,38 @@ def register_routes(app: FastAPI) -> None:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
         return render(request, "admin_tenant_form.html", {"t": tenant_id, "row": row, "error": None})
 
+    @app.post("/admin/tenants/test-connection")
+    async def admin_tenant_test_connection(request: Request):
+        from ..config import Tenant as TenantDC
+        from ..therefore import ThereforeClient
+        form = await request.form()
+
+        def get(name, default=""):
+            return form.get(name, default)
+
+        test_tenant = TenantDC(id="_test", base_url=get("base_url"), username=get("username"),
+                               password=get("password"), tenant_name_override=get("tenant_name_override") or None)
+        try:
+            ThereforeClient(test_tenant, timeout=15).test_connection()
+            note = f" (TenantName header: {test_tenant.tenant_name})" if test_tenant.tenant_name else ""
+            test_result = {"ok": True, "message": f"Connected successfully.{note}"}
+        except Exception as exc:
+            test_result = {"ok": False, "message": str(exc)}
+
+        tenant_id = get("tenant_id") or None   # set by a hidden field only when editing
+        row = {
+            "base_url": get("base_url"), "therefore_username": get("username"),
+            "password": get("password"),   # echoed back so a successful test doesn't need retyping
+            "tenant_name_override": get("tenant_name_override"),
+            "log_category_no": int(get("log_category_no") or 1), "log_tz": get("log_tz", "UTC"),
+            "display_tz": get("display_tz", "UTC"), "schedule_cron": get("schedule_cron", "30 3 * * *"),
+            "llm_enabled": bool(get("llm_enabled")), "llm_redact": bool(get("llm_redact")),
+            "digest_email_to": _split_emails(get("digest_email_to")), "enabled": bool(get("enabled")),
+        }
+        return render(request, "admin_tenant_form.html", {
+            "t": tenant_id, "row": row, "error": None, "test_result": test_result,
+            "new_id": get("id")})
+
     @app.post("/admin/tenants/new")
     def admin_tenant_create(request: Request, conn=Depends(db_conn),
                              id: str = Form(...), base_url: str = Form(...),
@@ -234,6 +266,16 @@ def register_routes(app: FastAPI) -> None:
         if confirm == tenant_id:
             cfg.delete_tenant(conn, tenant_id)
         return RedirectResponse(url="/admin/tenants", status_code=303)
+
+    @app.post("/admin/tenants/{tenant_id}/run")
+    def admin_tenant_run(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        """Run collect -> rules -> triage -> digest right now, outside its cron schedule."""
+        from ..pipeline import run_tenant
+        tenant = cfg.get_tenant(conn, tenant_id)
+        if not tenant:
+            return render(request, "not_found.html", {"tenant": None}, status_code=404)
+        stats = run_tenant(request.app.state.settings, tenant)
+        return render(request, "admin_tenant_run_result.html", {"tenant_id": tenant_id, "stats": stats})
 
     @app.get("/admin/tenants/{tenant_id}/rules")
     def admin_tenant_rules(request: Request, tenant_id: str, conn=Depends(db_conn)):

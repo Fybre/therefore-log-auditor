@@ -4,19 +4,25 @@
 <p><a class="row-link muted" href="/admin/tenants">&larr; tenants</a></p>
 <h1>{{ "Edit " ~ t if t else "Add tenant" }}</h1>
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
+{% if test_result %}
+<p style="color: {{ '#067647' if test_result.ok else '#b42318' }}">
+  {{ "Connection OK: " if test_result.ok else "Connection failed: " }}{{ test_result.message }}</p>
+{% endif %}
 <form class="card" method="post" action="{{ '/admin/tenants/' ~ t ~ '/edit' if t else '/admin/tenants/new' }}"
       style="display:flex;flex-direction:column;gap:10px;max-width:520px">
+  {% if t %}<input type="hidden" name="tenant_id" value="{{ t }}">{% endif %}
   {% if not t %}
   <label>Tenant ID (used in URLs, e.g. "craigdemo")</label>
-  <input type="text" name="id" required pattern="[a-zA-Z0-9._-]+">
+  <input type="text" name="id" required pattern="[a-zA-Z0-9._-]+" value="{{ new_id or '' }}">
   {% endif %}
   <label>Base URL</label>
   <input type="text" name="base_url" placeholder="https://craigdemo.thereforeonline.com"
          value="{{ row.base_url if row else '' }}" required>
   <label>Therefore username</label>
   <input type="text" name="username" value="{{ row.therefore_username if row else '' }}">
-  <label>Therefore password {% if row %}(leave blank to keep the current one){% endif %}</label>
-  <input type="password" name="password" {% if not row %}required{% endif %}>
+  <label>Therefore password {% if row and not test_result %}(leave blank to keep the current one){% endif %}</label>
+  <input type="password" name="password" {% if not row %}required{% endif %}
+         value="{{ row.password if (row and test_result) else '' }}">
   <label>TenantName header override (usually auto-detected from the base URL; leave blank unless needed)</label>
   <input type="text" name="tenant_name_override" value="{{ row.tenant_name_override or '' if row else '' }}">
   <label>Logfiles category number</label>
@@ -32,9 +38,19 @@
   <label>Digest email recipients (one per line)</label>
   <textarea name="digest_email_to" rows="2">{{ (row.digest_email_to | join('\n')) if row else '' }}</textarea>
   <label><input type="checkbox" name="enabled" value="true" {% if not row or row.enabled %}checked{% endif %}> Enabled (scheduled to run daily)</label>
-  <button type="submit" style="align-self:flex-start;padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+  <div style="display:flex;gap:10px">
+    <button type="submit" formaction="/admin/tenants/test-connection"
+            style="padding:8px 18px;background:#fff;color:#101828;border:1px solid #d0d5dd;border-radius:4px;cursor:pointer">Test connection</button>
+    <button type="submit" style="padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+  </div>
 </form>
 {% if t %}
+<form method="post" action="/admin/tenants/{{ t }}/run" class="card" style="max-width:520px">
+  <h2 style="margin-top:0">Run now</h2>
+  <p class="muted">Collect new logs, run rules, triage and send today's digest right now,
+    outside {{ t }}'s cron schedule.</p>
+  <button type="submit" style="padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Run {{ t }} now</button>
+</form>
 <form method="post" action="/admin/tenants/{{ t }}/delete" class="card" style="max-width:520px">
   <h2 style="margin-top:0">Delete tenant</h2>
   <p class="muted">Deletes the tenant's config only. Collected logs/findings for {{ t }} stay in the

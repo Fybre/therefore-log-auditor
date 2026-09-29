@@ -140,6 +140,21 @@ def test_admin_smtp_save_and_reload(client):
     assert smtp["password"] == "hunter2"   # round-trips through Fernet encryption
 
 
+def test_admin_run_now_triggers_pipeline(client, monkeypatch):
+    calls = []
+
+    def fake_run_tenant(settings, tenant, **kwargs):
+        calls.append(tenant.id)
+        return {"tenant": tenant.id, "files_new": 0, "events": 0, "findings": 0, "findings_changed": 0}
+
+    monkeypatch.setattr("auditor.pipeline.run_tenant", fake_run_tenant)
+    _login(client)
+    r = client.post("/admin/tenants/webtest/run")
+    assert r.status_code == 200
+    assert calls == ["webtest"]
+    assert "run complete" in r.text
+
+
 def test_admin_create_user_and_login_as_them(client):
     r = _login(client)
     assert r.status_code == 303

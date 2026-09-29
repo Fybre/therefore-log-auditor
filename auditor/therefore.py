@@ -119,6 +119,11 @@ class ThereforeClient:
         res = self.post("GetSettings", {"SettingKeys": list(keys)})
         return {s["Key"]: s.get("IntValue", s.get("StringValue")) for s in res.get("Settings") or []}
 
+    def test_connection(self) -> None:
+        """Raises ThereforeError (bad credentials/tenant) or requests.RequestException
+        (unreachable host) on failure. Does not touch Logfiles/settings - just auth."""
+        self.post("GetConnectionToken")
+
 
 def _month_windows(since: dt.date, until: dt.date) -> Iterator[tuple[dt.date, dt.date]]:
     lo = since

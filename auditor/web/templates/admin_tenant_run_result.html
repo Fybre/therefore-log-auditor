@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}{{ tenant_id }} run result - Therefore Log Auditor{% endblock %}
+{% block content %}
+<p><a class="row-link muted" href="/admin/tenants/{{ tenant_id }}/edit">&larr; {{ tenant_id }}</a></p>
+<h1>{{ tenant_id }} &middot; run {{ "failed" if stats.error else "complete" }}</h1>
+{% if stats.error %}
+<p class="error">{{ stats.error }}</p>
+{% else %}
+<p style="color:#067647">Done.</p>
+{% endif %}
+<div class="card">
+  <table>
+    <tr><td>New log files</td><td>{{ stats.files_new }}</td></tr>
+    <tr><td>New events</td><td>{{ stats.events }}</td></tr>
+    <tr><td>Findings (this run)</td><td>{{ stats.findings }}</td></tr>
+    <tr><td>Findings changed</td><td>{{ stats.findings_changed }}</td></tr>
+    {% if stats.llm %}
+    <tr><td>LLM triaged</td><td>{{ stats.llm.triaged }} (failed {{ stats.llm.failed }}, skipped {{ stats.llm.skipped }})</td></tr>
+    {% endif %}
+    <tr><td>LLM tokens used</td><td>{{ stats.llm_tokens or 0 }}</td></tr>
+  </table>
+</div>
+<p>
+  <a class="row-link" href="/t/{{ tenant_id }}/findings">View findings</a> &middot;
+  <a class="row-link" href="/admin/tenants/{{ tenant_id }}/edit">Back to {{ tenant_id }}</a>
+</p>
+{% endblock %}
