@@ -68,7 +68,7 @@
     {% for entry in items %}
     {% if entry.kind == "group" %}
     <tr class="group-row">
-      <td></td>
+      <td><input type="checkbox" class="group-check" title="Select all {{ entry.members | length }} in this group" onclick="toggleGroup(this)"></td>
       <td><span class="badge {{ entry.severity }}">{{ entry.severity }}</span></td>
       <td colspan="2">
         <details>
@@ -114,9 +114,24 @@
 <script>
 function toggleAll(cb) {
   document.querySelectorAll('.row-check').forEach(function (el) { el.checked = cb.checked; });
+  document.querySelectorAll('.group-check').forEach(function (el) { el.checked = cb.checked; el.indeterminate = false; });
   updateCount();
 }
+function toggleGroup(cb) {
+  cb.closest('tr').querySelectorAll('.row-check').forEach(function (el) { el.checked = cb.checked; });
+  cb.indeterminate = false;
+  updateCount();
+}
+function syncGroupCheckboxes() {
+  document.querySelectorAll('.group-check').forEach(function (group) {
+    var boxes = group.closest('tr').querySelectorAll('.row-check');
+    var checked = Array.prototype.filter.call(boxes, function (el) { return el.checked; }).length;
+    group.checked = checked === boxes.length;
+    group.indeterminate = checked > 0 && checked < boxes.length;
+  });
+}
 function updateCount() {
+  syncGroupCheckboxes();
   var n = document.querySelectorAll('.row-check:checked').length;
   document.getElementById('selCount').textContent = n + ' selected';
 }
