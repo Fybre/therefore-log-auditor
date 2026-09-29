@@ -12,7 +12,7 @@
   suppressed and reverse it later by removing the entry here. The count next to each entry is how
   many current findings it's suppressing - 0 usually means it's safe to remove.</p>
 
-{% if saved %}<p style="color:#067647">Saved.</p>{% endif %}
+{% if saved %}<p style="color:var(--good)">Saved.</p>{% endif %}
 
 <div class="card" style="max-width:640px">
   <label>Known users</label>
@@ -96,6 +96,6 @@
     {% endfor %}
   </div>
   {% endif %}
-  <button type="submit" style="align-self:flex-start;padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+  <button type="submit" style="align-self:flex-start;padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
 </form>
 {% endblock %}

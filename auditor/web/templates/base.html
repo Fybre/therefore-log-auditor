@@ -4,22 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Therefore Log Auditor{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9B%A1%EF%B8%8F%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <header>
-  <div>
-    <a href="/">Therefore Log Auditor</a>
+  <div class="header-left">
+    <a href="/" class="brand"><span class="brand-mark">&#128737;&#65039;</span> Therefore Log Auditor</a>
     {% if user %}
-    <a href="/admin/tenants" style="margin-left:16px;font-weight:400">Tenants</a>
-    <a href="/admin/smtp" style="margin-left:16px;font-weight:400">SMTP</a>
-    <a href="/admin/users" style="margin-left:16px;font-weight:400">Accounts</a>
+    <nav class="header-nav">
+      <a href="/admin/tenants">Tenants</a>
+      <a href="/admin/smtp">SMTP</a>
+      <a href="/admin/users">Accounts</a>
+    </nav>
     {% endif %}
   </div>
   {% if user %}
-  <span class="user">{{ user.username }}
+  <div class="header-right">
+    <span class="user">{{ user.username }}</span>
     <form method="post" action="/logout"><button type="submit">Log out</button></form>
-  </span>
+  </div>
   {% endif %}
 </header>
 <main>

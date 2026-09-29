@@ -5,7 +5,7 @@
 <h1>{{ "Edit " ~ t if t else "Add tenant" }}</h1>
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 {% if test_result %}
-<p style="color: {{ '#067647' if test_result.ok else '#b42318' }}">{{ test_result.message }}</p>
+<p style="color: {{ 'var(--good)' if test_result.ok else 'var(--high)' }}">{{ test_result.message }}</p>
 {% endif %}
 {% if category_matches %}
 <div class="card" style="max-width:520px">
@@ -50,10 +50,10 @@
   <label><input type="checkbox" name="enabled" value="true" {% if not row or row.enabled %}checked{% endif %}> Enabled (scheduled to run daily)</label>
   <div style="display:flex;gap:10px;flex-wrap:wrap">
     <button type="submit" formaction="/admin/tenants/test-connection"
-            style="padding:8px 18px;background:#fff;color:#101828;border:1px solid #d0d5dd;border-radius:4px;cursor:pointer">Test connection</button>
+            style="padding:8px 18px;background:#fff;color:var(--ink);border:1px solid var(--border-strong);border-radius:4px;cursor:pointer">Test connection</button>
     <button type="submit" formaction="/admin/tenants/detect-category"
-            style="padding:8px 18px;background:#fff;color:#101828;border:1px solid #d0d5dd;border-radius:4px;cursor:pointer">Detect Logfiles category</button>
-    <button type="submit" style="padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
+            style="padding:8px 18px;background:#fff;color:var(--ink);border:1px solid var(--border-strong);border-radius:4px;cursor:pointer">Detect Logfiles category</button>
+    <button type="submit" style="padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
   </div>
 </form>
 {% if t %}
@@ -61,14 +61,14 @@
   <h2 style="margin-top:0">Run now</h2>
   <p class="muted">Collect new logs, run rules, triage and send today's digest right now,
     outside {{ t }}'s cron schedule.</p>
-  <button type="submit" style="padding:8px 18px;background:#101828;color:#fff;border:none;border-radius:4px;cursor:pointer">Run {{ t }} now</button>
+  <button type="submit" style="padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Run {{ t }} now</button>
 </form>
 <form method="post" action="/admin/tenants/{{ t }}/delete" class="card" style="max-width:520px">
   <h2 style="margin-top:0">Delete tenant</h2>
   <p class="muted">Deletes the tenant's config only. Collected logs/findings for {{ t }} stay in the
     database. Type <code>{{ t }}</code> to confirm.</p>
   <input type="text" name="confirm" placeholder="{{ t }}">
-  <button type="submit" style="padding:8px 18px;background:#b42318;color:#fff;border:none;border-radius:4px;cursor:pointer;margin-top:8px">Delete {{ t }}</button>
+  <button type="submit" style="padding:8px 18px;background:var(--high);color:#fff;border:none;border-radius:4px;cursor:pointer;margin-top:8px">Delete {{ t }}</button>
 </form>
 {% endif %}
 {% endblock %}
