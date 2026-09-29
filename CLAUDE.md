@@ -141,8 +141,9 @@ Behaviours worth knowing:
 
 ## Open items / next steps
 
-1. **First Docker build on the Mac.** Run the commands above and fix anything that breaks,
-   e.g. dependency pins or the Dockerfile.
+1. ~~**First Docker build on the Mac.**~~ Done 29 Sep: `docker compose up -d --build` builds and
+   runs cleanly (Postgres + scheduler), a live `auditor run --tenant craigdemo` worked end to end,
+   and all 8 tests pass against the compose Postgres.
 2. **LogMask mapping** (a reminder was scheduled for 30 Sep 9am in the Cowork session). Poll
    `GetSettings` key 700 every ~10s while Craig toggles one Server Logging event at a time in
    Solution Designer, and diff to map positions to events. Then name the events in `config_drift`
@@ -162,9 +163,15 @@ Behaviours worth knowing:
    *not* logged, and successful Connects only appeared from 00:02 AEST 29 Sep. Also check that
    Craig's 08:47 AEST 29 Sep login and the settings-scan burst (about 1,500 GetSettings calls
    from the dev environment's IP around 11:00 AEST 29 Sep) show up.
-4. **Incident grouping.** Group related findings, e.g. all of cameron.lamond's (new user, new IP,
-   admin tool, success-after-failures), into one incident per user/IP per day so they're triaged
-   together.
+4. ~~**Incident grouping.**~~ Done 29 Sep: findings now get an `incident_key` (primary subject —
+   first user, else first IP — plus calendar day in `display_tz`; see `incident_key_for` in
+   `rules/engine.py`). `llm.triage()` sends all of an incident's findings in one call and applies
+   the single verdict/severity/explanation to every member; `digest.py` renders them as one entry
+   with a member-title bullet list. Covered by
+   `tests/test_rules_integration.py::test_incident_grouping_shares_one_llm_call` (a stub provider
+   asserts exactly one LLM call for two grouped findings). Not yet exercised by real tenant data —
+   craigdemo's current findings don't happen to co-occur for one user/IP/day — so watch the next
+   live incident to confirm the grouped narrative reads well in production, not just in the test.
 5. **Service account.** Create `svc.logaudit` (read Logfiles + settings; write only to a future
    "Audit Reports" category) and replace Craig's credentials in `.env`. Test whether a non-admin
    account can read `GetSettings`. Several keys expose infrastructure (SQL server, storage paths,
