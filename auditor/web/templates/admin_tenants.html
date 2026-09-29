@@ -7,18 +7,15 @@
   <tr><th>ID</th><th>Base URL</th><th>Schedule</th><th>LLM</th><th>Enabled</th><th></th></tr>
   {% for t in tenants %}
   <tr>
-    <td>{{ t.id }}</td>
+    <td><a class="row-link" href="/admin/tenants/{{ t.id }}/edit">{{ t.id }}</a></td>
     <td class="muted">{{ t.base_url }}</td>
     <td class="muted">{{ t.schedule.daily }} ({{ t.display_tz }})</td>
     <td class="muted">{{ "on" if t.llm.enabled else "off" }}</td>
     <td>{% if t.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}</td>
-    <td>
-      <a class="row-link" href="/admin/tenants/{{ t.id }}/edit">Edit</a> &middot;
-      <a class="row-link" href="/admin/tenants/{{ t.id }}/rules">Rules</a> &middot;
-      <a class="row-link" href="/t/{{ t.id }}/known">Known</a> &middot;
-      <a class="row-link" href="/t/{{ t.id }}/findings">Findings</a> &middot;
-      <form method="post" action="/admin/tenants/{{ t.id }}/run" style="display:inline">
-        <button type="submit" style="background:none;border:1px solid var(--border-strong);border-radius:4px;padding:1px 8px;cursor:pointer;font-size:13px">Run now</button>
+    <td style="text-align:right;white-space:nowrap">
+      <a class="row-link muted" href="/admin/tenants/{{ t.id }}/rules">Rules</a>
+      <form method="post" action="/admin/tenants/{{ t.id }}/run" style="display:inline;margin-left:10px">
+        <button type="submit" style="background:none;border:1px solid var(--border-strong);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12.5px">Run now</button>
       </form>
     </td>
   </tr>

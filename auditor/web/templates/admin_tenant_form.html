@@ -3,6 +3,12 @@
 {% block content %}
 <p><a class="row-link muted" href="/admin/tenants">&larr; tenants</a></p>
 <h1>{{ "Edit " ~ t if t else "Add tenant" }}</h1>
+{% if t %}
+<p style="margin-top:-12px">
+  <a class="row-link" href="/t/{{ t }}/findings">Findings</a> &middot;
+  <a class="row-link" href="/t/{{ t }}/known">Known activity</a>
+</p>
+{% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 {% if test_result %}
 <p style="color: {{ 'var(--good)' if test_result.ok else 'var(--high)' }}">{{ test_result.message }}</p>
