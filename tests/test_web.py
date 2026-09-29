@@ -170,6 +170,48 @@ def test_admin_smtp_save_and_reload(client):
     assert smtp["password"] == "hunter2"   # round-trips through Fernet encryption
 
 
+def test_admin_smtp_test_email_requires_address(client):
+    _login(client)
+    r = client.post("/admin/smtp/test", data={"host": "smtp.example.com", "port": "587"})
+    assert r.status_code == 200
+    assert "Enter an address" in r.text
+
+
+def test_admin_smtp_test_email_sends_with_unsaved_form_values(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr("auditor.digest.send_email",
+                        lambda smtp, to, subject, text, html=None: calls.append((smtp, to)))
+    _login(client)
+    r = client.post("/admin/smtp/test", data={
+        "host": "smtp.example.com", "port": "587", "user": "bot", "password": "hunter2",
+        "from_addr": "bot@example.com", "starttls": "true", "test_to": "craig@example.com"})
+    assert r.status_code == 200
+    assert "Test email sent to craig@example.com" in r.text
+    assert len(calls) == 1
+    smtp, to = calls[0]
+    assert smtp["host"] == "smtp.example.com" and smtp["password"] == "hunter2"
+    assert to == ["craig@example.com"]
+
+
+def test_admin_smtp_test_email_falls_back_to_saved_password(client, monkeypatch):
+    from auditor import config as cfg
+    from auditor import db
+    conn = db.connect(DB)
+    cfg.save_smtp(conn, host="smtp.example.com", port=587, user="bot", password="savedpw",
+                  from_addr="bot@example.com", starttls=True)
+    conn.close()
+
+    calls = []
+    monkeypatch.setattr("auditor.digest.send_email",
+                        lambda smtp, to, subject, text, html=None: calls.append(smtp))
+    _login(client)
+    r = client.post("/admin/smtp/test", data={
+        "host": "smtp.example.com", "port": "587", "user": "bot", "password": "",
+        "from_addr": "bot@example.com", "starttls": "true", "test_to": "craig@example.com"})
+    assert r.status_code == 200
+    assert calls[0]["password"] == "savedpw"
+
+
 def test_admin_run_now_triggers_pipeline(client, monkeypatch):
     calls = []
 

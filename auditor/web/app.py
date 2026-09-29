@@ -551,6 +551,34 @@ def register_routes(app: FastAPI) -> None:
         smtp = cfg.load_smtp(conn)
         return render(request, "admin_smtp.html", {"smtp": smtp, "saved": True})
 
+    @app.post("/admin/smtp/test")
+    def admin_smtp_test(request: Request, conn=Depends(db_conn), host: str = Form(""),
+                         port: int = Form(587), user: str = Form(""), password: str = Form(""),
+                         from_addr: str = Form(""), starttls: bool = Form(False), test_to: str = Form("")):
+        from .. import digest
+        user_obj = auth.current_user(request)
+        test_to = test_to.strip()
+        if not test_to:
+            test_result = {"ok": False, "message": "Enter an address to send the test email to."}
+        elif not host:
+            test_result = {"ok": False, "message": "Enter an SMTP host first."}
+        else:
+            # A blank password means "keep the saved one" everywhere else in this app, so a
+            # test without retyping it should behave the same way rather than trying anonymous auth.
+            pw = password or (cfg.load_smtp(conn) or {}).get("password", "")
+            smtp = {"host": host, "port": port, "user": user, "password": pw,
+                    "from": from_addr, "starttls": starttls}
+            try:
+                digest.send_email(smtp, [test_to], "Therefore Log Auditor - test email",
+                                  f"This is a test email from the Therefore Log Auditor dashboard's "
+                                  f"SMTP settings, sent by {user_obj.username if user_obj else 'a dashboard user'}.")
+                test_result = {"ok": True, "message": f"Test email sent to {test_to}."}
+            except Exception as exc:
+                test_result = {"ok": False, "message": f"Could not send: {exc}"}
+        smtp_display = {"host": host, "port": port, "user": user, "from": from_addr, "starttls": starttls}
+        return render(request, "admin_smtp.html", {
+            "smtp": smtp_display, "saved": False, "test_result": test_result, "test_to": test_to})
+
     # --- Admin: local accounts -----------------------------------------------------------
 
     @app.get("/admin/users")

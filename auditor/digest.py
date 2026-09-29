@@ -125,6 +125,23 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict) ->
     return subject, "\n".join(md), body
 
 
+def send_email(smtp: dict, to: list[str], subject: str, text: str, html: str | None = None) -> None:
+    """Raises on failure - callers decide whether to swallow it (write_and_send logs and
+    moves on so a broken SMTP config never blocks the report being written) or surface it
+    (the SMTP settings page's "Send test email")."""
+    msg = EmailMessage()
+    msg["Subject"], msg["From"], msg["To"] = subject, smtp.get("from") or smtp.get("user"), ", ".join(to)
+    msg.set_content(text)
+    if html:
+        msg.add_alternative(html, subtype="html")
+    with smtplib.SMTP(smtp["host"], smtp["port"], timeout=30) as s:
+        if smtp.get("starttls"):
+            s.starttls()
+        if smtp.get("user"):
+            s.login(smtp["user"], smtp["password"])
+        s.send_message(msg)
+
+
 def write_and_send(settings: Settings, tenant: Tenant, subject: str, md: str, body_html: str) -> Path:
     out_dir = settings.reports_dir / tenant.id
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -135,17 +152,8 @@ def write_and_send(settings: Settings, tenant: Tenant, subject: str, md: str, bo
     to = (tenant.digest or {}).get("email_to") or []
     smtp = settings.smtp
     if to and smtp.get("host"):
-        msg = EmailMessage()
-        msg["Subject"], msg["From"], msg["To"] = subject, smtp.get("from") or smtp.get("user"), ", ".join(to)
-        msg.set_content(md)
-        msg.add_alternative(body_html, subtype="html")
         try:
-            with smtplib.SMTP(smtp["host"], smtp["port"], timeout=30) as s:
-                if smtp.get("starttls"):
-                    s.starttls()
-                if smtp.get("user"):
-                    s.login(smtp["user"], smtp["password"])
-                s.send_message(msg)
+            send_email(smtp, to, subject, md, body_html)
             log.info("Digest emailed to %s", to)
         except Exception:
             log.exception("Sending digest email failed (report still written to %s)", path)

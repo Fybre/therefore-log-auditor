@@ -5,6 +5,9 @@
 <p class="muted">Used to email the daily digest to each tenant's <code>digest_email_to</code>
   list. Leave the host blank to only write reports to disk (no email sent).</p>
 {% if saved %}<p style="color:var(--good)">Saved.</p>{% endif %}
+{% if test_result %}
+<p style="color: {{ 'var(--good)' if test_result.ok else 'var(--high)' }}">{{ test_result.message }}</p>
+{% endif %}
 <form class="card" method="post" action="/admin/smtp" style="display:flex;flex-direction:column;gap:10px;max-width:420px">
   <label>SMTP host</label>
   <input type="text" name="host" value="{{ smtp.host }}">
@@ -17,6 +20,14 @@
   <label>From address</label>
   <input type="text" name="from_addr" value="{{ smtp['from'] }}">
   <label><input type="checkbox" name="starttls" value="true" {% if smtp.starttls %}checked{% endif %}> Use STARTTLS</label>
+  <label style="margin-top:6px">Send a test email to</label>
+  <div style="display:flex;gap:8px">
+    <input type="email" name="test_to" placeholder="you@example.com" style="flex:1" value="{{ test_to or '' }}">
+    <button type="submit" formaction="/admin/smtp/test"
+            style="padding:8px 14px;background:var(--surface);color:var(--text);border:1px solid var(--border-strong);border-radius:4px;cursor:pointer;white-space:nowrap">Send test email</button>
+  </div>
+  <p class="muted" style="margin:-4px 0 0;font-size:12px">Tests whatever is in the form above,
+    even if you haven't saved it yet. Leaving Password blank uses the already-saved password.</p>
   <button type="submit" style="align-self:flex-start;padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Save</button>
 </form>
 {% endblock %}
