@@ -24,14 +24,14 @@ def _data(findings, open_counts=None):
 
 def test_render_without_dashboard_url_has_no_links():
     tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
-    subject, md, html_body = render(tenant, _data([_finding()]), None, {})
+    subject, md, html_body = render(tenant, _data([_finding()]), None)
     assert "http" not in md
     assert "Open the dashboard" not in html_body
 
 
 def test_render_with_dashboard_url_links_findings_and_dashboard():
     tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
-    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None, {},
+    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None,
                                     dashboard_url="https://audit.example.com")
     assert "https://audit.example.com/t/acme/findings" in md
     assert "https://audit.example.com/t/acme/findings/42" in md
@@ -41,7 +41,7 @@ def test_render_with_dashboard_url_links_findings_and_dashboard():
 
 def test_render_adds_review_links_when_dashboard_url_and_secret_set():
     tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
-    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None, {},
+    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None,
                                     dashboard_url="https://audit.example.com", review_secret="s3cret")
     assert "/review/" in md
     assert "Mark reviewed" in md and "False positive" in md
@@ -53,7 +53,7 @@ def test_render_omits_review_links_without_a_secret():
     """Without AUDITOR_WEB_SECRET configured, review links can't be signed - omit them rather
     than emit a link that will always show 'invalid or expired'."""
     tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
-    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None, {},
+    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None,
                                     dashboard_url="https://audit.example.com", review_secret="")
     assert "/review/" not in md
     assert "Mark reviewed" not in html_body
@@ -62,7 +62,7 @@ def test_render_omits_review_links_without_a_secret():
 def test_render_strips_trailing_slash_from_dashboard_url():
     """Avoids a double slash (.../findings//42) if someone saves the URL with a trailing /."""
     tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
-    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None, {},
+    subject, md, html_body = render(tenant, _data([_finding(id=42)]), None,
                                     dashboard_url="https://audit.example.com/")
     assert "//findings" not in md
 
@@ -73,7 +73,7 @@ def test_render_shows_currently_open_counts_separately_from_todays_changes():
     adding it, since a finding stops appearing in `findings` once it stops changing day to day."""
     tenant = Tenant(id="acme", base_url="https://acme.thereforeonline.com", display_tz="UTC")
     data = _data([], open_counts={"high": 2, "medium": 5, "low": 1, "info": 0})
-    subject, md, html_body = render(tenant, data, None, {})
+    subject, md, html_body = render(tenant, data, None)
     assert "Currently open: 2 high, 5 medium, 1 low" in md
     assert "Currently open: 2 high, 5 medium, 1 low" in html_body
 

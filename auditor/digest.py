@@ -56,7 +56,7 @@ def gather(conn: psycopg.Connection, tenant: Tenant, since: dt.datetime) -> dict
             "open_counts": open_counts, "file_errors": errors}
 
 
-def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
+def render(tenant: Tenant, data: dict, summary: dict | None,
           dashboard_url: str = "", review_secret: str = "") -> tuple[str, str, str]:
     dashboard_url = (dashboard_url or "").rstrip("/")
     tz = ZoneInfo(tenant.display_tz)
@@ -117,7 +117,6 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
         md += ["## Expected / suppressed", ""] + [f"- {f['title']} ({f['suppressed_by'] or f['llm_verdict']})" for f in info] + [""]
     md += ["## Log freshness", ""] + [
         f"- {r['application']}: last file {r['generated']}, last event {local(r['last_event'])}" for r in data["freshness"]]
-    md += ["", f"Run: {run_stats}"]
 
     # HTML
     rows = []
@@ -166,7 +165,6 @@ def render(tenant: Tenant, data: dict, summary: dict | None, run_stats: dict,
 <table style="width:100%;border-collapse:collapse">{''.join(rows) or '<tr><td>No findings need attention.</td></tr>'}</table>
 {('<h3>Expected / suppressed</h3><ul>' + info_html + '</ul>') if info_html else ''}
 <h3>Log freshness</h3><ul>{fresh}</ul>
-<p style="color:#98a2b3;font-size:12px">Run: {html.escape(str(run_stats))}</p>
 </body></html>"""
     return subject, "\n".join(md), body
 

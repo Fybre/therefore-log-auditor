@@ -67,7 +67,7 @@ def run_tenant(settings: Settings, tenant: Tenant, kind: str = "daily", since: d
                 summary = llm.summarise(provider, tenant, {"counts": data["counts"], **stats}, data["findings"])
             if provider:
                 stats["llm_tokens"] = provider.usage.total
-            subject, md, body = digest.render(tenant, data, summary, stats, dashboard_url=settings.dashboard_url,
+            subject, md, body = digest.render(tenant, data, summary, dashboard_url=settings.dashboard_url,
                                               review_secret=settings.review_link_secret)
             stats["report"] = str(digest.write_and_send(settings, tenant, subject, md, body,
                                                          has_new_findings=stats["findings_changed"] > 0))
