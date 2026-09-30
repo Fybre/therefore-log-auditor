@@ -138,7 +138,29 @@ header button {
 header button:hover { border-color: #6b7280; color: #fff; }
 #themeToggle { padding: 5px 9px; font-size: 13px; line-height: 1; }
 
+.nav-toggle {
+  display: none; background: transparent; border: 1px solid #3a3f4b; color: #d0d5dd;
+  border-radius: var(--radius-sm); padding: 4px 10px; cursor: pointer; font-size: 16px; line-height: 1.4;
+}
+.nav-toggle:hover { border-color: #6b7280; color: #fff; }
+
 main { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
+
+/* Mobile: collapse the nav behind a hamburger, and let wide tables scroll horizontally
+   within themselves instead of forcing the whole page to scroll sideways. */
+@media (max-width: 700px) {
+  .nav-toggle { display: inline-flex; align-items: center; }
+  .header-nav {
+    display: none; position: absolute; top: 56px; left: 0; right: 0; flex-direction: column;
+    background: var(--ink); padding: 6px 16px 14px; box-shadow: 0 6px 16px rgba(0,0,0,0.28);
+  }
+  .header-nav.open { display: flex; }
+  .header-nav a { padding: 10px 6px; }
+
+  main { padding: 20px 16px 48px; }
+
+  table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
+}
 
 h1 { font-size: 21px; font-weight: 650; margin: 0 0 20px; letter-spacing: -0.015em; }
 h2 { font-size: 14.5px; font-weight: 650; margin: 0 0 10px; letter-spacing: -0.005em; }

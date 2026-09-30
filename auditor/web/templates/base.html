@@ -24,7 +24,8 @@
   <div class="header-left">
     <a href="/" class="brand"><span class="brand-mark">&#128737;&#65039;</span> Therefore Log Auditor</a>
     {% if user %}
-    <nav class="header-nav">
+    <button type="button" id="navToggle" class="nav-toggle" aria-label="Menu" aria-expanded="false" onclick="toggleNav()">&#9776;</button>
+    <nav class="header-nav" id="headerNav">
       <a href="/admin/tenants">Tenants</a>
       <a href="/admin/smtp">SMTP</a>
       <a href="/admin/users">Accounts</a>
@@ -61,6 +62,14 @@
     paintToggle();
   }
   paintToggle();
+
+  function toggleNav() {
+    var nav = document.getElementById("headerNav");
+    var btn = document.getElementById("navToggle");
+    if (!nav) return;
+    var open = nav.classList.toggle("open");
+    if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
 </script>
 </body>
 </html>
