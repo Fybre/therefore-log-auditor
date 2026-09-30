@@ -5,6 +5,7 @@ local-account login model."""
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import re
 import uuid
 from pathlib import Path
@@ -77,6 +78,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         warnings.append("AUDITOR_WEB_SECRET is not set - dashboard logins will not survive a "
                         "restart. Set a stable value in .env.")
     app.state.deployment_warnings = warnings
+    # A cache-busting query string for static assets, derived from style.css's own content so it
+    # changes exactly when the file does. Without this, a CDN/edge cache in front of the app
+    # (e.g. a Cloudflare Tunnel) can keep serving a stale stylesheet for its full TTL after a
+    # deploy, regardless of how thoroughly the container itself was rebuilt - happened for real:
+    # cf-cache-status: HIT, serving a 35-minute-old style.css well after the fix was live on
+    # origin. Appending ?v=<hash> makes it a different URL the CDN has never seen, so it always
+    # fetches fresh from origin instead of waiting out the cache TTL.
+    try:
+        app.state.static_version = hashlib.sha256((STATIC_DIR / "style.css").read_bytes()).hexdigest()[:12]
+    except OSError:
+        app.state.static_version = "0"
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["local_time"] = local_time
@@ -158,7 +170,8 @@ def register_routes(app: FastAPI) -> None:
     def render(request, name, ctx, status_code: int = 200):
         return templates.TemplateResponse(request, name, {
             "user": auth.current_user(request), "common_timezones": COMMON_TIMEZONES,
-            "deployment_warnings": request.app.state.deployment_warnings, **ctx},
+            "deployment_warnings": request.app.state.deployment_warnings,
+            "static_version": request.app.state.static_version, **ctx},
             status_code=status_code)
 
     # --- Auth --------------------------------------------------------------------------

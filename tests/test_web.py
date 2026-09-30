@@ -65,6 +65,19 @@ def test_login_then_findings_list(client):
     assert "AUDITOR_ENC_KEY" not in r.text   # client fixture sets both secrets - no warning banner
 
 
+def test_stylesheet_link_is_cache_busted(client):
+    """Regression: a CDN/edge cache in front of the app (e.g. a Cloudflare Tunnel) kept serving
+    a stale style.css for its full TTL after a real deploy, since the URL never changed. The
+    query string must change whenever the file's content does, so a fresh deploy is always a
+    URL the CDN has never seen."""
+    import hashlib
+    from auditor.web.app import STATIC_DIR
+    _login(client)
+    r = client.get("/admin/tenants")
+    expected = hashlib.sha256((STATIC_DIR / "style.css").read_bytes()).hexdigest()[:12]
+    assert f'/static/style.css?v={expected}' in r.text
+
+
 def test_missing_secrets_show_a_dashboard_warning(monkeypatch):
     """Regression: a missing AUDITOR_ENC_KEY on a real deployment silently generated a fresh
     random key every restart, permanently breaking every previously-stored password with no
