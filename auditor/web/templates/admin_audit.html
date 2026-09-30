@@ -5,6 +5,7 @@
 <p class="muted">Changes made to the auditor's own configuration - tenants, SMTP, rule toggles,
   dashboard accounts. This is separate from the findings the auditor raises about a tenant's
   Therefore activity. Showing the most recent {{ entries | length }} entries, newest first.</p>
+<div class="table-scroll">
 <table>
   <tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Tenant</th><th>Detail</th></tr>
   {% for e in entries %}
@@ -21,4 +22,5 @@
   <tr><td colspan="5" class="muted">Nothing logged yet.</td></tr>
   {% endfor %}
 </table>
+</div>
 {% endblock %}

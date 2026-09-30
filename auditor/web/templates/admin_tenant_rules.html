@@ -10,7 +10,7 @@
 <form method="post" action="/admin/tenants/{{ tenant_id }}/rules">
   {% for r in rows %}
   <div class="card" style="max-width:640px">
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <div style="display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px">
       <div>
         <code style="font-size:14px">{{ r.rule_id }}</code>
         <span class="muted" style="margin-left:8px">global default: {{ "enabled" if r.global_default else "disabled" }}</span>

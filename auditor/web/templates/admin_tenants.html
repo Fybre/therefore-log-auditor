@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Tenants / servers</h1>
 <p><a class="row-link" href="/admin/tenants/new">+ Add tenant</a></p>
+<div class="table-scroll">
 <table>
   <tr><th>ID</th><th>Base URL</th><th>Schedule</th><th>LLM</th><th>Enabled</th><th>Last run</th><th></th></tr>
   {% for t in tenants %}
@@ -31,6 +32,7 @@
   <tr><td colspan="7" class="muted">No tenants configured yet.</td></tr>
   {% endfor %}
 </table>
+</div>
 <p class="muted" style="font-size:12px">A scheduler health check runs every 30 minutes and emails
   if a tenant's runs stop happening, start failing, or get stuck - see the alert recipients on the
   <a class="row-link" href="/admin/smtp">SMTP page</a>.</p>

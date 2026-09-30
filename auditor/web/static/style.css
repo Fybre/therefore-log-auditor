@@ -173,17 +173,20 @@ h2 { font-size: 14.5px; font-weight: 650; margin: 0 0 10px; letter-spacing: -0.0
 
 a { color: var(--accent); }
 
+/* A plain wrapper div, not overflow-x directly on <table>, on purpose: WebKit/Safari has known
+   quirks where overflow-x: auto (even with display: block) doesn't reliably become touch-
+   scrollable on a <table> element itself, even though it works fine in Chromium. A div is a
+   completely ordinary scroll container in every engine, so this is the reliable version. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-scroll table { min-width: 100%; }
+@media (max-width: 700px) {
+  .table-scroll table { width: max-content; white-space: nowrap; }
+}
+
 table {
   width: 100%; border-collapse: collapse; background: var(--surface);
   border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
-}
-@media (max-width: 700px) {
-  /* Lets a wide table scroll horizontally within itself instead of forcing the whole page to
-     scroll sideways. Must come after the base `table` rule above (not grouped with the other
-     mobile rules near the top of the file) - that rule's `overflow: hidden` shorthand would
-     otherwise win the cascade on tied specificity and silently override this every time. */
-  table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
 }
 th, td { text-align: left; padding: 11px 14px; font-size: 13.5px; }
 td { border-top: 1px solid var(--border); }

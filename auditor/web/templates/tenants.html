@@ -6,6 +6,7 @@
   to jump straight to just those open findings. Click "Known activity" to see and manage that
   tenant's allow-list - the users, IPs, and change windows already explained away, so they stop
   showing up as new every day.</p>
+<div class="table-scroll">
 <table>
   <tr><th>Tenant</th><th>Open high</th><th>Open medium</th><th>Open low</th><th>Last finding</th><th>Known activity</th></tr>
   {% for r in rows %}
@@ -31,4 +32,5 @@
   </tr>
   {% endfor %}
 </table>
+</div>
 {% endblock %}
