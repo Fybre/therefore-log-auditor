@@ -181,11 +181,15 @@ Behaviours worth knowing:
   **One unknown key fails the whole batch**, and key 4 is "not accessible". This is documented
   in the therefore-api skill (pitfall #39) and in the therefore-mcp knowledge base, both pushed
   to GitHub.
-  - **701 (archive mode) confirmed values:** `1` = Every day, `2` = Every week. Monthly and
-    by-size not yet tested.
+  - **701 (archive mode) - fully confirmed 30 Sep:** `1` = Every day, `2` = Every week,
+    `3` = Every month, `4` = On size (the UI's own label - not "by size").
   - **702 (weekday, only meaningful in weekly mode) confirmed values:** `1` = Sunday,
     `2` = Monday - a 1-indexed week starting Sunday (so presumably `3`=Tue ... `7`=Sat, untested
-    beyond Sun/Mon but the pattern is clear).
+    beyond Sun/Mon but the pattern is clear). In monthly/on-size mode the Weekday dropdown is
+    blank/disabled in the UI but 702 keeps whatever value it last held (not reset server-side).
+  - **Monthly mode has no exposed day-of-month control** in Solution Designer - the archive day
+    is presumably hardcoded server-side; not discoverable without waiting for a real monthly
+    rotation and checking the date it lands on.
 - Content Connector's "Start collaboration" is set to "Do not log" on craigdemo, although the
   documented default is Always.
 
@@ -227,28 +231,30 @@ Behaviours worth knowing:
      Values confirmed so far: `0` = Do not log, `2` = Log success, `3` = Log always (per the
      skill). `1` = Log failure is documented but **see the anomaly below before trusting a `1`
      result** for New/Retrieve/Change specifically.
-   - **Open anomaly, found 30 Sep, not yet root-caused:** selecting **"Log failure"** for New,
-     Retrieve, or Change in Solution Designer and clicking OK does not reliably persist as value
-     `1`. Repeated tests landed on `3` ("Log always") instead - reproduced multiple times, survived
-     a full Solution Designer restart and a tenant restart (ruling out client-side or simple
-     server-side caching). "Do not log" and "Log success" selections on the *same* rows persisted
-     correctly (confirmed values `0` and `2`). Near the end of the session a further test (setting
-     New to "Log always", an already-non-buggy value) produced an unexpected `3`→`1` transition
-     instead, which doesn't fit the pattern established by earlier tests either - so treat *all*
-     reads/writes around positions 5/15/23 from the tail end of the 30 Sep session (roughly from
-     the "Change → Log failure" test onward) as unreliable ground truth, not just the "Log
-     failure" transitions specifically. Two live hypotheses, neither confirmed:
-     1. A real Therefore-side business rule: certain core write-critical document events can't be
-        set to "failure-only" logging and silently get promoted to "Always".
-     2. A Solution Designer UI/dropdown bug specific to how the "Log failure" option (and possibly
-        subsequent saves generally, once a session has done several edits) commits for these rows.
-     **Next session:** re-verify position 5/15/23 from scratch with a fully fresh Solution
-     Designer session (not continuing from this session's dialog state), doing exactly one
-     change-save-fresh-reload-screenshot cycle per test with no back-to-back edits, and note the
-     exact wall-clock time of each OK click in case there's a delayed-write race condition rather
-     than a value-mapping bug. Worth trying a value Solution Designer hasn't shown any trouble
-     with (e.g. "Log always") as the very first action in a brand new session, to see if the
-     `3`→`1` surprise repeats even in isolation.
+   - **Open anomaly, found 30 Sep, not yet root-caused:** for New, Retrieve and Change
+     specifically, "Log failure" vs "Log always" as shown in the Solution Designer UI is
+     consistently the opposite of what `GetSettings` key 700 reports for those positions -
+     reproduced independently on two separate days/sessions, always in the same direction
+     (UI="Log always" ↔ backend=`1`, UI="Log failure" ↔ backend=`3`), surviving a full Solution
+     Designer restart and a tenant restart. "Do not log" (`0`) and "Log success" (`2`) are
+     unaffected and read/write consistently on the same rows. Three live hypotheses, **none
+     confirmed - do not assume which is correct**:
+     1. A real Therefore-side business rule that silently promotes certain core write-critical
+        events to "Always" when "failure-only" is requested.
+     2. A Solution Designer UI/dropdown bug where these two options are bound to swapped
+        underlying values for these three rows only.
+     3. **(Craig's suggestion, 30 Sep, probably the best next test)** Both the UI and the config
+        are actually correct/consistent, and it's specifically `GetSettings`'s *reporting* of key
+        700 that's wrong for these two values on these rows - i.e. the logging itself works as
+        configured, only our read-back via the REST API is misleading.
+     **Definitive test for next time (settles all three hypotheses at once):** set New to "Log
+     always" via the UI, create/save a test document, then set New to "Log failure" via the UI,
+     create/save another test document - then check the actual Server log to see whether both
+     documents' New events were logged (→ hypothesis 3, always-really-was-always and
+     failure-really-was-failure, API read-back is just wrong) or only one was (→ hypothesis 1 or
+     2, the configured level really did end up different from what was selected). Not urgent -
+     Craig doesn't currently need this resolved, but worth doing before trusting any `1`/`3`
+     read from positions 5/15/23 for real monitoring decisions.
    - Remaining: map the other 47 positions the same way, one event at a time (Craig's stated
      protocol: change one event, save, confirm; then revert it, save, confirm; then move to the
      next - and always screenshot after a full dialog close/reopen, not just after Save, since a
