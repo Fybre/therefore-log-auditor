@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+from typing import Callable
 
 from . import collector, digest, llm
 from .config import Settings, Tenant
@@ -14,7 +15,11 @@ log = logging.getLogger(__name__)
 
 
 def run_tenant(settings: Settings, tenant: Tenant, kind: str = "daily", since: dt.date | None = None,
-               use_llm: bool = True, send_digest: bool = True, rules_from: dt.datetime | None = None) -> dict:
+               use_llm: bool = True, send_digest: bool = True, rules_from: dt.datetime | None = None,
+               on_started: Callable[[int], None] | None = None) -> dict:
+    """`on_started`, if given, is called with the new `runs.id` as soon as it's known (before
+    any of the slow work below) - lets a caller running this in a background thread hand the
+    run id back to a web request immediately, rather than blocking on the whole run."""
     conn = connect(settings.database_url)
     migrate(conn)
     started = dt.datetime.now(dt.timezone.utc)
@@ -22,6 +27,8 @@ def run_tenant(settings: Settings, tenant: Tenant, kind: str = "daily", since: d
         cur.execute("INSERT INTO runs (tenant_id, kind) VALUES (%s, %s) RETURNING id", (tenant.id, kind))
         run_id = cur.fetchone()["id"]
     conn.commit()
+    if on_started:
+        on_started(run_id)
     stats: dict = {"tenant": tenant.id, "kind": kind}
     try:
         client = ThereforeClient(tenant)
@@ -69,11 +76,15 @@ def run_tenant(settings: Settings, tenant: Tenant, kind: str = "daily", since: d
         stats["error"] = str(exc)
         log.exception("Run failed for %s", tenant.id)
     finally:
+        llm_stats = stats.get("llm") or {}
         with conn.cursor() as cur:
             cur.execute("""UPDATE runs SET finished_at=now(), files=%s, events=%s, findings=%s,
-                               llm_tokens=%s, error=%s WHERE id=%s""",
+                               llm_tokens=%s, error=%s, findings_changed=%s, llm_triaged=%s,
+                               llm_failed=%s, llm_skipped=%s WHERE id=%s""",
                         (stats.get("files_new", 0), stats.get("events", 0), stats.get("findings", 0),
-                         stats.get("llm_tokens", 0), stats.get("error"), run_id))
+                         stats.get("llm_tokens", 0), stats.get("error"), stats.get("findings_changed", 0),
+                         llm_stats.get("triaged"), llm_stats.get("failed"), llm_stats.get("skipped"),
+                         run_id))
         conn.commit()
         conn.close()
     return stats

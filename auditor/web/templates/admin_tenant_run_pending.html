@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ tenant_id }} run in progress - Therefore Log Auditor{% endblock %}
+{% block head_extra %}<meta http-equiv="refresh" content="3">{% endblock %}
+{% block content %}
+<p><a class="row-link muted" href="/admin/tenants/{{ tenant_id }}/edit">&larr; {{ tenant_id }}</a></p>
+<h1>{{ tenant_id }} &middot; run in progress</h1>
+<div class="card" style="max-width:480px">
+  <p class="muted">Started {{ started_at | local_time("UTC") }} UTC. This page refreshes itself
+    every few seconds - collecting logs and running an LLM triage can take a while for a tenant
+    with a lot of history, so there's no need to keep this tab open if you don't want to; the
+    run keeps going either way and the result will be here (or in the digest email) when it's
+    done.</p>
+</div>
+{% endblock %}

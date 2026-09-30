@@ -627,8 +627,15 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/admin/tenants/{tenant_id}/run")
     def admin_tenant_run(request: Request, tenant_id: str, conn=Depends(db_conn)):
-        """Run collect -> rules -> triage -> digest right now, outside its cron schedule."""
+        """Kicks off collect -> rules -> triage -> digest in a background thread and redirects
+        to a page that polls for completion, rather than blocking this request for the run's
+        whole duration - a slow run (many log files, LLM triage) can easily take minutes, and
+        holding an HTTP request open that long times out through a reverse proxy or tunnel
+        (e.g. Cloudflare's ~100s limit) even though the run itself is still working fine."""
+        import queue
+        import threading
         from ..pipeline import run_tenant
+
         tenant = cfg.get_tenant(conn, tenant_id)
         if not tenant:
             return render(request, "not_found.html", {"tenant": None}, status_code=404)
@@ -639,9 +646,48 @@ def register_routes(app: FastAPI) -> None:
         # sending - "Run now" would produce a report but never email it, however SMTP is
         # configured or how recently.
         cfg.refresh_from_db(request.app.state.settings, conn)
-        stats = run_tenant(request.app.state.settings, tenant)
-        audit.log_action(conn, _actor(request), "tenant.run", tenant_id=tenant_id,
-                         detail={"findings": stats.get("findings"), "error": stats.get("error")})
+        settings = request.app.state.settings
+        actor = _actor(request)
+        started_ids: queue.Queue = queue.Queue()
+
+        def worker():
+            stats = run_tenant(settings, tenant, on_started=started_ids.put)
+            audit_conn = connect(settings.database_url)
+            try:
+                audit.log_action(audit_conn, actor, "tenant.run", tenant_id=tenant_id,
+                                 detail={"findings": stats.get("findings"), "error": stats.get("error")})
+            finally:
+                audit_conn.close()
+
+        threading.Thread(target=worker, daemon=True).start()
+        try:
+            run_id = started_ids.get(timeout=15)
+        except queue.Empty:
+            # Extremely unlikely (just DB connect + one INSERT) - the run is still proceeding
+            # in the background regardless, just without a run id to poll on yet.
+            return render(request, "admin_tenant_run_result.html", {
+                "tenant_id": tenant_id,
+                "stats": {"error": "Run started but didn't confirm within 15s - check "
+                                    "the Last run column on the tenants list shortly."}})
+        return RedirectResponse(url=f"/admin/tenants/{tenant_id}/run/{run_id}", status_code=303)
+
+    @app.get("/admin/tenants/{tenant_id}/run/{run_id}")
+    def admin_tenant_run_status(request: Request, tenant_id: str, run_id: int, conn=Depends(db_conn)):
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM runs WHERE id=%s AND tenant_id=%s", (run_id, tenant_id))
+            run = cur.fetchone()
+        if not run:
+            return render(request, "not_found.html", {"tenant": None}, status_code=404)
+        if run["finished_at"] is None:
+            return render(request, "admin_tenant_run_pending.html", {
+                "tenant_id": tenant_id, "run_id": run_id, "started_at": run["started_at"]})
+        stats = {
+            "files_new": run["files"], "events": run["events"], "findings": run["findings"],
+            "findings_changed": run["findings_changed"], "llm_tokens": run["llm_tokens"],
+            "error": run["error"],
+            "llm": ({"triaged": run["llm_triaged"], "failed": run["llm_failed"], "skipped": run["llm_skipped"]}
+                    if run["llm_triaged"] is not None else None),
+        }
         return render(request, "admin_tenant_run_result.html", {"tenant_id": tenant_id, "stats": stats})
 
     @app.get("/admin/tenants/{tenant_id}/rules")

@@ -356,19 +356,46 @@ def test_admin_smtp_test_email_falls_back_to_saved_password(client, monkeypatch)
     assert calls[0]["password"] == "savedpw"
 
 
-def test_admin_run_now_triggers_pipeline(client, monkeypatch):
-    calls = []
-
-    def fake_run_tenant(settings, tenant, **kwargs):
-        calls.append(tenant.id)
+def _fake_run_tenant_factory(db, DB, on_call=None):
+    """A stand-in for pipeline.run_tenant() that mimics just enough of the real thing for the
+    "Run now" web flow to work end to end in tests: insert a `runs` row (the real function's
+    job, normally), call on_started with its id (the whole point of the async flow being
+    tested), and return a minimal stats dict."""
+    def fake_run_tenant(settings, tenant, on_started=None, **kwargs):
+        if on_call:
+            on_call(settings, tenant)
+        conn = db.connect(DB)
+        with conn.cursor() as cur:
+            cur.execute("""INSERT INTO runs (tenant_id, kind, finished_at, files, events, findings,
+                               findings_changed) VALUES (%s, 'daily', now(), 0, 0, 0, 0) RETURNING id""",
+                        (tenant.id,))
+            run_id = cur.fetchone()["id"]
+        conn.commit()
+        conn.close()
+        if on_started:
+            on_started(run_id)
         return {"tenant": tenant.id, "files_new": 0, "events": 0, "findings": 0, "findings_changed": 0}
+    return fake_run_tenant
 
-    monkeypatch.setattr("auditor.pipeline.run_tenant", fake_run_tenant)
+
+def test_admin_run_now_redirects_to_a_polling_status_page(client, monkeypatch):
+    """"Run now" must not block the HTTP request for the run's whole duration - a slow run can
+    exceed a reverse proxy/tunnel's timeout (e.g. Cloudflare's ~100s) even though the run itself
+    is still working fine. It should return almost immediately with a redirect to a status page
+    that reflects the real run's outcome once finished."""
+    from auditor import db
+    calls = []
+    monkeypatch.setattr("auditor.pipeline.run_tenant",
+                        _fake_run_tenant_factory(db, DB, on_call=lambda s, t: calls.append(t.id)))
     _login(client)
-    r = client.post("/admin/tenants/webtest/run")
-    assert r.status_code == 200
+    r = client.post("/admin/tenants/webtest/run", follow_redirects=False)
+    assert r.status_code == 303
+    assert "/admin/tenants/webtest/run/" in r.headers["location"]
+
+    r2 = client.get(r.headers["location"])
+    assert r2.status_code == 200
+    assert "run complete" in r2.text
     assert calls == ["webtest"]
-    assert "run complete" in r.text
 
 
 def test_run_now_refreshes_smtp_before_running(client, monkeypatch):
@@ -384,16 +411,34 @@ def test_run_now_refreshes_smtp_before_running(client, monkeypatch):
     conn.close()
 
     seen_smtp = {}
-
-    def fake_run_tenant(settings, tenant, **kwargs):
-        seen_smtp.update(settings.smtp)
-        return {"tenant": tenant.id, "files_new": 0, "events": 0, "findings": 0, "findings_changed": 0}
-
-    monkeypatch.setattr("auditor.pipeline.run_tenant", fake_run_tenant)
+    monkeypatch.setattr("auditor.pipeline.run_tenant",
+                        _fake_run_tenant_factory(db, DB, on_call=lambda s, t: seen_smtp.update(s.smtp)))
     _login(client)
-    r = client.post("/admin/tenants/webtest/run")
-    assert r.status_code == 200
+    r = client.post("/admin/tenants/webtest/run", follow_redirects=False)
+    assert r.status_code == 303
     assert seen_smtp.get("host") == "smtp.example.com"
+
+
+def test_run_status_shows_pending_page_while_still_running(client):
+    from auditor import db
+    _login(client)
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO runs (tenant_id, kind) VALUES ('webtest', 'daily') RETURNING id")
+        run_id = cur.fetchone()["id"]
+    conn.commit()
+    conn.close()
+
+    r = client.get(f"/admin/tenants/webtest/run/{run_id}")
+    assert r.status_code == 200
+    assert "run in progress" in r.text
+    assert 'http-equiv="refresh"' in r.text
+
+
+def test_run_status_404s_for_unknown_run_id(client):
+    _login(client)
+    r = client.get("/admin/tenants/webtest/run/999999")
+    assert r.status_code == 404
 
 
 def test_detect_category_uniquely(client, monkeypatch):
