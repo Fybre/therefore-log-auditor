@@ -239,9 +239,17 @@ def register_routes(app: FastAPI) -> None:
 
     @app.get("/t/{tenant_id}/findings")
     def findings_list(request: Request, tenant_id: str, conn=Depends(db_conn),
-                       min_severity: str = "low", status: str = "", days: int = 30, rule: str = ""):
+                       min_severity: str = "low", severity: str = "", status: str = "",
+                       days: int = 30, rule: str = ""):
         tenant = cfg.get_tenant(conn, tenant_id)
-        allowed = list(SEV_ORDER)[:list(SEV_ORDER).index(min_severity) + 1] if min_severity in SEV_ORDER else list(SEV_ORDER)
+        # `severity` is an exact match (one severity only) - used by links next to a count that's
+        # itself an exact count (the tenants list, and this page's own summary pills), so what
+        # you land on always matches what you clicked. `min_severity` is cumulative ("X and
+        # worse") - only the filter dropdown's own "X+ severity" options mean to use that.
+        if severity in SEV_ORDER:
+            allowed = [severity]
+        else:
+            allowed = list(SEV_ORDER)[:list(SEV_ORDER).index(min_severity) + 1] if min_severity in SEV_ORDER else list(SEV_ORDER)
         since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
         with conn.cursor() as cur:
             # Severity breakdown ignores the severity filter itself, so switching min_severity
@@ -269,9 +277,9 @@ def register_routes(app: FastAPI) -> None:
             findings = cur.fetchall()
         return render(request, "findings.html", {
             "tenant": tenant, "items": _group_for_display(findings, tenant.display_tz),
-            "min_severity": min_severity, "status": status, "days": days, "rule": rule,
-            "statuses": REVIEW_STATUSES, "severity_counts": severity_counts, "rule_counts": rule_counts,
-            "total": sum(severity_counts.values())})
+            "min_severity": min_severity, "severity": severity, "status": status, "days": days,
+            "rule": rule, "statuses": REVIEW_STATUSES, "severity_counts": severity_counts,
+            "rule_counts": rule_counts, "total": sum(severity_counts.values())})
 
     @app.get("/t/{tenant_id}/findings/{finding_id}")
     def finding_detail(request: Request, tenant_id: str, finding_id: int, conn=Depends(db_conn)):

@@ -98,6 +98,64 @@ def test_missing_secrets_show_a_dashboard_warning(monkeypatch):
     assert "AUDITOR_WEB_SECRET is not set" in r.text
 
 
+def test_severity_link_shows_only_that_exact_severity(client):
+    """Regression: the tenants-list and this page's own summary pills show an EXACT per-severity
+    count (e.g. "3 medium"), but used to link via min_severity, which is cumulative ("medium and
+    worse") - so clicking "3 medium" showed high+medium findings, more than the 3 it promised.
+    The dedicated `severity` param must show exactly (and only) that severity."""
+    from auditor import config as cfg
+    from auditor import db
+    from auditor.rules.engine import Finding, save_findings
+    _login(client)
+
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    now = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+    save_findings(conn, tenant, [
+        Finding(rule_id="new_entity", dedupe_key="user:highuser", title="New user: highuser",
+                severity="high", first_ts=now, last_ts=now, subject_users=["highuser"]),
+        Finding(rule_id="new_entity", dedupe_key="ip:9.9.9.9", title="New IP: 9.9.9.9",
+                severity="low", first_ts=now, last_ts=now, subject_ips=["9.9.9.9"]),
+    ])
+    conn.close()
+    # webtest now has: 1 high, 1 medium (the client fixture's seeded finding), 1 low
+
+    r = client.get("/t/webtest/findings?severity=medium")
+    assert "New user: mallory" in r.text          # the medium one
+    assert "highuser" not in r.text                # not the high one
+    assert "9.9.9.9" not in r.text                  # not the low one
+
+    r = client.get("/t/webtest/findings?severity=high")
+    assert "highuser" in r.text
+    assert "mallory" not in r.text
+    assert "9.9.9.9" not in r.text
+
+
+def test_min_severity_dropdown_stays_cumulative(client):
+    """The findings page's own filter dropdown ("medium+ severity") is intentionally cumulative,
+    unlike the `severity` exact-match links - this must keep working as "medium and worse"."""
+    from auditor import config as cfg
+    from auditor import db
+    from auditor.rules.engine import Finding, save_findings
+    _login(client)
+
+    conn = db.connect(DB)
+    tenant = cfg.get_tenant(conn, "webtest")
+    now = dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)
+    save_findings(conn, tenant, [
+        Finding(rule_id="new_entity", dedupe_key="user:highuser", title="New user: highuser",
+                severity="high", first_ts=now, last_ts=now, subject_users=["highuser"]),
+        Finding(rule_id="new_entity", dedupe_key="ip:9.9.9.9", title="New IP: 9.9.9.9",
+                severity="low", first_ts=now, last_ts=now, subject_ips=["9.9.9.9"]),
+    ])
+    conn.close()
+
+    r = client.get("/t/webtest/findings?min_severity=medium")
+    assert "highuser" in r.text     # high is "worse" than medium, included
+    assert "mallory" in r.text      # medium itself, included
+    assert "9.9.9.9" not in r.text  # low is excluded
+
+
 def test_review_persists_and_shows_reviewer(client):
     _login(client)
     findings_id = 1

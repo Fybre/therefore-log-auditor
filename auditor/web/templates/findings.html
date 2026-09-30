@@ -5,8 +5,8 @@
 
 <div class="summary">
   {% for s in ["high", "medium", "low", "info"] %}
-  <a class="sum-pill {{ 'active' if s == min_severity }}"
-     href="?min_severity={{ s }}&status={{ status }}&days={{ days }}&rule={{ rule }}">
+  <a class="sum-pill {{ 'active' if s == severity }}"
+     href="?severity={{ s }}&status={{ status }}&days={{ days }}&rule={{ rule }}">
     <span class="badge {{ s }}">{{ s }}</span> {{ severity_counts.get(s, 0) }}
   </a>
   {% endfor %}
@@ -17,7 +17,7 @@
 <div class="summary" style="margin-top:4px">
   {% for r in rule_counts %}
   <a class="sum-pill {{ 'active' if r.rule_id == rule }}"
-     href="?min_severity={{ min_severity }}&status={{ status }}&days={{ days }}&rule={{ '' if r.rule_id == rule else r.rule_id }}">
+     href="?min_severity={{ min_severity }}&severity={{ severity }}&status={{ status }}&days={{ days }}&rule={{ '' if r.rule_id == rule else r.rule_id }}">
     <code>{{ r.rule_id }}</code> {{ r.n }}
   </a>
   {% endfor %}
@@ -42,13 +42,13 @@
     <option value="{{ d }}" {% if d == days %}selected{% endif %}>last {{ d }} days</option>
     {% endfor %}
   </select>
-  {% if rule %}<span class="pill">rule: {{ rule }} <a href="?min_severity={{ min_severity }}&status={{ status }}&days={{ days }}" style="color:inherit">&times;</a></span>{% endif %}
+  {% if rule %}<span class="pill">rule: {{ rule }} <a href="?min_severity={{ min_severity }}&severity={{ severity }}&status={{ status }}&days={{ days }}" style="color:inherit">&times;</a></span>{% endif %}
   <noscript><button type="submit">Filter</button></noscript>
 </form>
 
 <form id="bulkForm" method="post" action="/t/{{ tenant.id }}/findings/bulk-review">
   <input type="hidden" name="return_qs"
-         value="min_severity={{ min_severity }}&status={{ status }}&days={{ days }}&rule={{ rule }}">
+         value="min_severity={{ min_severity }}&severity={{ severity }}&status={{ status }}&days={{ days }}&rule={{ rule }}">
   <div class="filters" style="display:flex;align-items:center;gap:8px;background:var(--surface);padding:8px 12px;border-radius:8px;margin-bottom:8px">
     <span id="selCount" class="muted" style="font-size:13px">0 selected</span>
     <select name="status" required>
@@ -73,7 +73,7 @@
       <td colspan="2">
         <details>
           <summary>{{ entry.members | length }} <code>{{ entry.rule_id }}</code> findings on {{ entry.day.strftime("%d %b %Y") }}
-            <a class="row-link muted" href="?min_severity={{ min_severity }}&status={{ status }}&days={{ days }}&rule={{ entry.rule_id }}" style="margin-left:6px;font-size:12px">(filter to just this rule)</a></summary>
+            <a class="row-link muted" href="?min_severity={{ min_severity }}&severity={{ severity }}&status={{ status }}&days={{ days }}&rule={{ entry.rule_id }}" style="margin-left:6px;font-size:12px">(filter to just this rule)</a></summary>
           <table style="margin-top:6px">
             {% for f in entry.members %}
             <tr>
