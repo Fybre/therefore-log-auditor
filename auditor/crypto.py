@@ -1,13 +1,18 @@
 """Symmetric encryption for secrets stored in Postgres (tenant Therefore passwords, the SMTP
 password) now that tenant/server config lives in the database instead of .env.
 
-AUDITOR_ENC_KEY must be a stable Fernet key - generate one with
-`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-and put it in .env. If it's not set, a random key is generated for this process only: everything
-encrypted this run becomes unreadable after a restart, so this is fine for a quick local test but
-not for anything you want to survive a redeploy."""
+Set AUDITOR_ENC_KEY in .env to anything - a passphrase, a UUID, whatever. It doesn't need to be
+a "real" Fernet key: any non-empty string that isn't already one is deterministically stretched
+into one (see _derive below), so the only real requirement is that it stays the same across
+restarts. (A key generated with `Fernet.generate_key()` is also accepted as-is, for anyone who
+already has one - it's used directly rather than re-derived, so existing deployments aren't
+affected by this.) If AUDITOR_ENC_KEY isn't set at all, a random key is generated for this
+process only: everything encrypted this run becomes unreadable after a restart, so this is fine
+for a quick local test but not for anything you want to survive a redeploy."""
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import os
 
@@ -17,21 +22,25 @@ log = logging.getLogger(__name__)
 _key_cache: bytes | None = None
 
 
-def enc_key_is_stable() -> bool:
-    """True if AUDITOR_ENC_KEY is set to a real Fernet key - i.e. secrets encrypted now will
-    still be readable after a restart. Used to show a dashboard warning before this bites
-    someone the way it silently did in production: without a stable key, every restart gets a
-    fresh random one and every previously-stored password becomes permanently undecryptable
-    (crypto.decrypt() then just logs and returns "", so the symptom is a confusing downstream
-    auth failure, not an obvious error at the source)."""
-    key = os.environ.get("AUDITOR_ENC_KEY")
-    if not key:
-        return False
+def _derive(raw: str) -> bytes:
+    """Turn any non-empty string into a valid, stable Fernet key. If `raw` already is one, it's
+    returned as-is (so a properly generated key keeps working unchanged); otherwise a Fernet key
+    is deterministically derived from it, so the same input string always yields the same key."""
     try:
-        Fernet(key.encode())
-        return True
+        Fernet(raw.encode())
+        return raw.encode()
     except ValueError:
-        return False
+        return base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest())
+
+
+def enc_key_is_stable() -> bool:
+    """True if AUDITOR_ENC_KEY is set - i.e. secrets encrypted now will still be readable after
+    a restart. Used to show a dashboard warning before this bites someone the way it silently
+    did in production: without a stable key, every restart gets a fresh random one and every
+    previously-stored password becomes permanently undecryptable (crypto.decrypt() then just
+    logs and returns "", so the symptom is a confusing downstream auth failure, not an obvious
+    error at the source)."""
+    return bool(os.environ.get("AUDITOR_ENC_KEY"))
 
 
 def _key() -> bytes:
@@ -39,25 +48,14 @@ def _key() -> bytes:
     if _key_cache:
         return _key_cache
     key = os.environ.get("AUDITOR_ENC_KEY")
-    if key:
-        try:
-            Fernet(key.encode())   # validates it's a real 32-byte url-safe base64 key
-        except ValueError:
-            log.error(
-                "AUDITOR_ENC_KEY is set but is not a valid Fernet key (generate one with "
-                "`python -c \"from cryptography.fernet import Fernet; "
-                "print(Fernet.generate_key().decode())\"`) - falling back to a random key for "
-                "this process only."
-            )
-            key = None
     if not key:
         log.warning(
-            "AUDITOR_ENC_KEY not set (or invalid) - using a random key for this process only. "
-            "Secrets saved now (tenant/SMTP passwords) will not be readable after a restart. "
-            "Set a valid key in .env."
+            "AUDITOR_ENC_KEY not set - using a random key for this process only. Secrets saved "
+            "now (tenant/SMTP passwords) will not be readable after a restart. Set any stable "
+            "value in .env."
         )
         key = Fernet.generate_key().decode()
-    _key_cache = key.encode()
+    _key_cache = _derive(key)
     return _key_cache
 
 

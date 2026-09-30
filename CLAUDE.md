@@ -82,8 +82,9 @@ Config (rewritten 29 Sep - see "Dashboard config" below for the full story):
   legacy-only, read once by `auditor import-legacy-config`.
 - `.env` (gitignored) now only holds what has to exist before the database does: `LLM_BASE_URL`,
   `LLM_API_KEY` (OpenRouter key, $250 limit), `LLM_MODEL`, `AUDITOR_WEB_USER/PASSWORD/SECRET`
-  (dashboard login/session), and `AUDITOR_ENC_KEY` (Fernet key encrypting tenant/SMTP passwords
-  at rest - **keep it stable, losing it means every stored password becomes unreadable**).
+  (dashboard login/session), and `AUDITOR_ENC_KEY` (encrypts tenant/SMTP passwords at rest -
+  can be any string, doesn't need to be a real Fernet key, it's derived if not - **keep it
+  stable, losing it means every stored password becomes unreadable**).
   `DATABASE_URL` is set by compose.
 - `config/rules.yaml` still holds the *global default* rule thresholds - only per-tenant
   overrides/toggles moved to the database (`tenant_rule_settings` table, editable at

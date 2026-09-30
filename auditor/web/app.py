@@ -71,8 +71,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # itself so it can't go unnoticed the way it did before this was added.
     warnings = []
     if not crypto.enc_key_is_stable():
-        warnings.append("AUDITOR_ENC_KEY is not set (or invalid) - stored passwords (tenant "
-                        "logins, SMTP) will not survive a restart. Set a stable key in .env.")
+        warnings.append("AUDITOR_ENC_KEY is not set - stored passwords (tenant logins, SMTP) "
+                        "will not survive a restart. Set any stable value in .env.")
     if not auth.web_secret_is_stable():
         warnings.append("AUDITOR_WEB_SECRET is not set - dashboard logins will not survive a "
                         "restart. Set a stable value in .env.")
