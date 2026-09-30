@@ -42,6 +42,11 @@
     {% endif %}
   </div>
 </header>
+{% if user and deployment_warnings %}
+<div class="deploy-warning">
+  {% for w in deployment_warnings %}<div>&#9888;&#65039; {{ w }}</div>{% endfor %}
+</div>
+{% endif %}
 <main>
   {% block content %}{% endblock %}
 </main>

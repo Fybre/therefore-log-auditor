@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import audit
 from .. import config as cfg
+from .. import crypto
 from .. import link_tokens
 from .. import passwords
 from ..config import Settings, load_settings
@@ -63,6 +64,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cfg.refresh_from_db(settings, conn)   # SMTP is DB-config; don't start out with empty defaults
     app = FastAPI(title="Therefore Log Auditor")
     app.state.settings = settings
+    # Checked once at startup, not per-request - env vars don't change at runtime. A missing
+    # AUDITOR_ENC_KEY is the serious one: every restart gets a fresh random key and every
+    # previously-stored password becomes permanently undecryptable, with no error until
+    # something downstream (e.g. Therefore auth) fails confusingly. Surfaced in the dashboard
+    # itself so it can't go unnoticed the way it did before this was added.
+    warnings = []
+    if not crypto.enc_key_is_stable():
+        warnings.append("AUDITOR_ENC_KEY is not set (or invalid) - stored passwords (tenant "
+                        "logins, SMTP) will not survive a restart. Set a stable key in .env.")
+    if not auth.web_secret_is_stable():
+        warnings.append("AUDITOR_WEB_SECRET is not set - dashboard logins will not survive a "
+                        "restart. Set a stable value in .env.")
+    app.state.deployment_warnings = warnings
 
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
     templates.env.filters["local_time"] = local_time
@@ -143,7 +157,8 @@ def register_routes(app: FastAPI) -> None:
 
     def render(request, name, ctx, status_code: int = 200):
         return templates.TemplateResponse(request, name, {
-            "user": auth.current_user(request), "common_timezones": COMMON_TIMEZONES, **ctx},
+            "user": auth.current_user(request), "common_timezones": COMMON_TIMEZONES,
+            "deployment_warnings": request.app.state.deployment_warnings, **ctx},
             status_code=status_code)
 
     # --- Auth --------------------------------------------------------------------------

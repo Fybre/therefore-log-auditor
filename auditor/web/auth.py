@@ -60,6 +60,13 @@ def current_user(request: Request) -> User | None:
     return User(id=session_user["id"], username=session_user["username"])
 
 
+def web_secret_is_stable() -> bool:
+    """True if AUDITOR_WEB_SECRET is set - i.e. logins survive a restart. Milder than a missing
+    AUDITOR_ENC_KEY (nothing is lost, everyone just gets logged out), but the same class of
+    "silently fine until a restart" trap, so it's checked alongside it for the dashboard warning."""
+    return bool(os.environ.get("AUDITOR_WEB_SECRET"))
+
+
 def session_secret() -> str:
     secret = os.environ.get("AUDITOR_WEB_SECRET")
     if not secret:

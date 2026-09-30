@@ -162,6 +162,11 @@ main { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
   table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
 }
 
+.deploy-warning {
+  background: var(--medium-bg); color: var(--medium); border-bottom: 1px solid var(--medium);
+  font-size: 13px; padding: 8px 24px; display: flex; flex-direction: column; gap: 4px;
+}
+
 h1 { font-size: 21px; font-weight: 650; margin: 0 0 20px; letter-spacing: -0.015em; }
 h2 { font-size: 14.5px; font-weight: 650; margin: 0 0 10px; letter-spacing: -0.005em; }
 

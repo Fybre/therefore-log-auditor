@@ -17,6 +17,23 @@ log = logging.getLogger(__name__)
 _key_cache: bytes | None = None
 
 
+def enc_key_is_stable() -> bool:
+    """True if AUDITOR_ENC_KEY is set to a real Fernet key - i.e. secrets encrypted now will
+    still be readable after a restart. Used to show a dashboard warning before this bites
+    someone the way it silently did in production: without a stable key, every restart gets a
+    fresh random one and every previously-stored password becomes permanently undecryptable
+    (crypto.decrypt() then just logs and returns "", so the symptom is a confusing downstream
+    auth failure, not an obvious error at the source)."""
+    key = os.environ.get("AUDITOR_ENC_KEY")
+    if not key:
+        return False
+    try:
+        Fernet(key.encode())
+        return True
+    except ValueError:
+        return False
+
+
 def _key() -> bytes:
     global _key_cache
     if _key_cache:

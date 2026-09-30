@@ -62,6 +62,40 @@ def test_login_then_findings_list(client):
     r = client.get("/t/webtest/findings?min_severity=info")
     assert r.status_code == 200
     assert "New user: mallory" in r.text
+    assert "AUDITOR_ENC_KEY" not in r.text   # client fixture sets both secrets - no warning banner
+
+
+def test_missing_secrets_show_a_dashboard_warning(monkeypatch):
+    """Regression: a missing AUDITOR_ENC_KEY on a real deployment silently generated a fresh
+    random key every restart, permanently breaking every previously-stored password with no
+    visible error until something downstream (Therefore auth) failed confusingly. This must be
+    surfaced in the dashboard itself, not just logged."""
+    from auditor import config as cfg
+    from auditor import db
+    from auditor.config import Settings
+    from auditor.web.app import create_app
+    from fastapi.testclient import TestClient
+
+    monkeypatch.delenv("AUDITOR_ENC_KEY", raising=False)
+    monkeypatch.delenv("AUDITOR_WEB_SECRET", raising=False)
+    conn = db.connect(DB)
+    with conn.cursor() as cur:
+        cur.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+    conn.commit()
+    db.migrate(conn)
+    conn.close()
+
+    monkeypatch.setenv("AUDITOR_WEB_USER", "tester")
+    monkeypatch.setenv("AUDITOR_WEB_PASSWORD", "s3cret")
+    settings = Settings(DB, [], {}, "", "", "", {}, None)
+    app = create_app(settings)
+    client = TestClient(app)
+    client.post("/login", data={"username": "tester", "password": "s3cret", "next": "/"})
+
+    r = client.get("/admin/tenants")
+    assert r.status_code == 200
+    assert "AUDITOR_ENC_KEY is not set" in r.text
+    assert "AUDITOR_WEB_SECRET is not set" in r.text
 
 
 def test_review_persists_and_shows_reviewer(client):
