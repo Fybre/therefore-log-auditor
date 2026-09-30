@@ -2,6 +2,10 @@
 {% block title %}Tenants - Therefore Log Auditor{% endblock %}
 {% block content %}
 <h1>Tenants</h1>
+<p class="muted">Click a tenant's name to see all of its findings. Click a high/medium/low count
+  to jump straight to just those open findings. Click "Known activity" to see and manage that
+  tenant's allow-list - the users, IPs, and change windows already explained away, so they stop
+  showing up as new every day.</p>
 <table>
   <tr><th>Tenant</th><th>Open high</th><th>Open medium</th><th>Open low</th><th>Last finding</th><th>Known activity</th></tr>
   {% for r in rows %}
