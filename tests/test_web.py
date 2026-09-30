@@ -475,6 +475,51 @@ def test_run_status_404s_for_unknown_run_id(client):
     assert r.status_code == 404
 
 
+def test_test_connection_falls_back_to_stored_password_when_field_left_blank(client, monkeypatch):
+    """Regression: leaving the password field blank on an existing tenant's edit form means
+    "keep the current password" everywhere else, but Test Connection used to send an empty
+    password in that case and always fail - making it impossible to confirm a saved credential
+    still works without retyping it."""
+    seen = {}
+    monkeypatch.setattr(
+        "auditor.therefore.ThereforeClient.test_connection",
+        lambda self: seen.update(password=self.session.auth[1]))
+    _login(client)
+    r = client.post("/admin/tenants/test-connection", data={
+        "tenant_id": "webtest", "base_url": "https://webtest.thereforeonline.com",
+        "username": "svc", "password": ""})
+    assert r.status_code == 200
+    assert seen.get("password") == "pw"   # the stored password from the client fixture's setup
+    assert "Connected successfully" in r.text
+
+
+def test_test_connection_uses_newly_typed_password_when_given(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "auditor.therefore.ThereforeClient.test_connection",
+        lambda self: seen.update(password=self.session.auth[1]))
+    _login(client)
+    r = client.post("/admin/tenants/test-connection", data={
+        "tenant_id": "webtest", "base_url": "https://webtest.thereforeonline.com",
+        "username": "svc", "password": "brand-new-password"})
+    assert r.status_code == 200
+    assert seen.get("password") == "brand-new-password"
+
+
+def test_test_connection_on_a_new_tenant_with_no_password_stays_blank(client, monkeypatch):
+    """No tenant_id (still on the "Add tenant" form) means there's no stored password to fall
+    back to - an empty field should just stay empty, not error out looking one up."""
+    seen = {}
+    monkeypatch.setattr(
+        "auditor.therefore.ThereforeClient.test_connection",
+        lambda self: seen.update(password=self.session.auth[1]))
+    _login(client)
+    r = client.post("/admin/tenants/test-connection", data={
+        "base_url": "https://newone.thereforeonline.com", "username": "svc", "password": ""})
+    assert r.status_code == 200
+    assert seen.get("password") == ""
+
+
 def test_detect_category_uniquely(client, monkeypatch):
     monkeypatch.setattr(
         "auditor.therefore.ThereforeClient.list_categories",

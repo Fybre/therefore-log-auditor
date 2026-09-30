@@ -506,10 +506,10 @@ def register_routes(app: FastAPI) -> None:
             "t": tenant_id, "row": _augment_schedule(row), "error": None, "log_settings": log_settings})
 
     @app.post("/admin/tenants/test-connection")
-    async def admin_tenant_test_connection(request: Request):
+    async def admin_tenant_test_connection(request: Request, conn=Depends(db_conn)):
         from ..therefore import ThereforeClient
         form = await request.form()
-        test_tenant = _test_tenant_from_form(form)
+        test_tenant = _test_tenant_from_form(conn, form)
         try:
             ThereforeClient(test_tenant, timeout=15).test_connection()
             note = f" (TenantName header: {test_tenant.tenant_name})" if test_tenant.tenant_name else ""
@@ -521,10 +521,10 @@ def register_routes(app: FastAPI) -> None:
             "test_result": test_result, "new_id": form.get("id")})
 
     @app.post("/admin/tenants/detect-category")
-    async def admin_tenant_detect_category(request: Request):
+    async def admin_tenant_detect_category(request: Request, conn=Depends(db_conn)):
         from ..therefore import ThereforeClient
         form = await request.form()
-        test_tenant = _test_tenant_from_form(form)
+        test_tenant = _test_tenant_from_form(conn, form)
         category_matches: list[dict] = []
         detected: int | None = None
         try:
@@ -875,11 +875,21 @@ def register_routes(app: FastAPI) -> None:
         return render(request, "admin_audit.html", {"entries": audit.recent(conn)})
 
 
-def _test_tenant_from_form(form) -> cfg.Tenant:
+def _test_tenant_from_form(conn, form) -> cfg.Tenant:
     """A throwaway, unsaved Tenant built from an add/edit-tenant form submission, for
-    test-connection and detect-category (both need a real client but nothing persisted)."""
+    test-connection and detect-category (both need a real client but nothing persisted).
+    A blank password field means "keep the current one" everywhere else on this form (see the
+    password field's own label), so testing with it blank should test the *stored* password on
+    an existing tenant, not fail with an empty one - otherwise "confirm my saved credentials
+    still work" is impossible without retyping the password first."""
+    password = form.get("password", "")
+    tenant_id = form.get("tenant_id")
+    if not password and tenant_id:
+        existing = cfg.get_tenant(conn, tenant_id)
+        if existing:
+            password = existing.password
     return cfg.Tenant(id="_test", base_url=form.get("base_url", ""), username=form.get("username", ""),
-                      password=form.get("password", ""),
+                      password=password,
                       tenant_name_override=form.get("tenant_name_override") or None)
 
 
