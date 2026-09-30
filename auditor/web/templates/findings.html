@@ -49,7 +49,7 @@
 <form id="bulkForm" method="post" action="/t/{{ tenant.id }}/findings/bulk-review">
   <input type="hidden" name="return_qs"
          value="min_severity={{ min_severity }}&severity={{ severity }}&status={{ status }}&days={{ days }}&rule={{ rule }}">
-  <div class="filters" style="display:flex;align-items:center;gap:8px;background:var(--surface);padding:8px 12px;border-radius:8px;margin-bottom:8px">
+  <div class="filters" style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--surface);padding:8px 12px;border-radius:8px;margin-bottom:8px">
     <span id="selCount" class="muted" style="font-size:13px">0 selected</span>
     <select name="status" required>
       <option value="" disabled selected>set status to...</option>

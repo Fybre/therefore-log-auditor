@@ -146,8 +146,11 @@ header button:hover { border-color: #6b7280; color: #fff; }
 
 main { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
 
-/* Mobile: collapse the nav behind a hamburger, and let wide tables scroll horizontally
-   within themselves instead of forcing the whole page to scroll sideways. */
+/* Mobile: collapse the nav behind a hamburger. The table-scrolling override lives further
+   down, after the base `table` rule - not here - because that rule sets the `overflow`
+   shorthand (for rounded corners), which resets both overflow-x AND overflow-y together; put
+   here, it would sit earlier in the cascade and the later, unconditional base rule would win on
+   the tied specificity and silently clobber this media query's overflow-x every time. */
 @media (max-width: 700px) {
   .nav-toggle { display: inline-flex; align-items: center; }
   .header-nav {
@@ -158,8 +161,6 @@ main { max-width: 980px; margin: 0 auto; padding: 32px 24px 64px; }
   .header-nav a { padding: 10px 6px; }
 
   main { padding: 20px 16px 48px; }
-
-  table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
 }
 
 .deploy-warning {
@@ -176,6 +177,13 @@ table {
   width: 100%; border-collapse: collapse; background: var(--surface);
   border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
   border: 1px solid var(--border);
+}
+@media (max-width: 700px) {
+  /* Lets a wide table scroll horizontally within itself instead of forcing the whole page to
+     scroll sideways. Must come after the base `table` rule above (not grouped with the other
+     mobile rules near the top of the file) - that rule's `overflow: hidden` shorthand would
+     otherwise win the cascade on tied specificity and silently override this every time. */
+  table { display: block; overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; }
 }
 th, td { text-align: left; padding: 11px 14px; font-size: 13.5px; }
 td { border-top: 1px solid var(--border); }
