@@ -157,51 +157,50 @@ Note: Live monitoring detects security anomalies in near real time. Suspected bu
 activity represents unusual volume or patterns and should be investigated in context.
 """
 
-    badge_color = "#dc2626" if severity == 'high' else "#f59e0b"
-    esc_pill = '<span style="display:inline-block;padding:2px 8px;font-size:12px;font-weight:600;background:#fee2e2;color:#991b1b;border-radius:4px;margin-left:8px;">ESCALATED</span>' if alert_type == 'escalation' else ''
-
-    html_link = f'<p style="margin:24px 0 16px"><a href="{html.escape(link)}" style="display:inline-block;padding:10px 20px;background:#2563eb;color:#ffffff;text-decoration:none;border-radius:6px;font-weight:600;font-size:14px;">View live finding & evidence →</a></p>' if link else ''
+    # Inherit foreground/background from the mail client or Teams channel. Fixed
+    # white text becomes unreadable when a forwarding client removes dark fills.
+    escalation_label = ' · ESCALATED' if alert_type == 'escalation' else ''
+    html_link = f'<p style="margin:20px 0"><a href="{html.escape(link)}" style="text-decoration:underline;">View live finding &amp; evidence</a></p>' if link else ''
 
     body_html = f"""<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
-<body style="margin:0;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#0f172a;color:#f8fafc;">
-  <div style="max-width:640px;margin:0 auto;background:#1e293b;border:1px solid #334155;border-radius:8px;padding:24px;box-shadow:0 4px 6px rgba(0,0,0,0.3);">
-    <div style="border-bottom:1px solid #334155;padding-bottom:16px;margin-bottom:20px;">
-      <span style="display:inline-block;padding:3px 10px;font-size:12px;font-weight:700;text-transform:uppercase;background:{badge_color};color:#ffffff;border-radius:4px;letter-spacing:0.5px;">{severity}</span>
-      {esc_pill}
-      <h1 style="margin:12px 0 4px;font-size:20px;color:#ffffff;font-weight:600;">{html.escape(title)}</h1>
-      <div style="font-size:14px;color:#94a3b8;">Tenant: <strong style="color:#e2e8f0;">{html.escape(tenant_id)}</strong> · Subject: <strong style="color:#e2e8f0;">{html.escape(subject_str)}</strong></div>
+<body style="margin:0;padding:16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;">
+  <div style="max-width:640px;margin:0 auto;">
+    <div style="border-bottom:1px solid #cccccc;padding-bottom:12px;margin-bottom:16px;">
+      <p style="margin:0"><strong>Severity: {html.escape(severity.upper())}{escalation_label}</strong></p>
+      <h1 style="margin:8px 0;font-size:20px;">{html.escape(title)}</h1>
+      <p style="margin:0">Tenant: <strong>{html.escape(tenant_id)}</strong><br>Subject: <strong>{html.escape(subject_str)}</strong></p>
     </div>
 
-    <div style="background:#0f172a;border-left:4px solid {badge_color};padding:14px 16px;border-radius:4px;margin-bottom:20px;font-size:15px;line-height:1.5;color:#e2e8f0;">
+    <p style="margin:16px 0;font-size:15px;">
       {html.escape(summary)}
-    </div>
+    </p>
 
-    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:13.5px;">
+    <table style="width:100%;border-collapse:collapse;margin-bottom:20px;font-size:14px;">
       <tr>
-        <td style="padding:8px 12px;color:#94a3b8;border-bottom:1px solid #334155;width:35%;">First observed</td>
-        <td style="padding:8px 12px;color:#f8fafc;border-bottom:1px solid #334155;">{html.escape(f_str)}</td>
+        <th scope="row" style="padding:8px 0;text-align:left;vertical-align:top;width:35%;">First observed</th>
+        <td style="padding:8px 12px;">{html.escape(f_str)}</td>
       </tr>
       <tr>
-        <td style="padding:8px 12px;color:#94a3b8;border-bottom:1px solid #334155;">Last observed</td>
-        <td style="padding:8px 12px;color:#f8fafc;border-bottom:1px solid #334155;">{html.escape(l_str)}</td>
+        <th scope="row" style="padding:8px 0;text-align:left;vertical-align:top;">Last observed</th>
+        <td style="padding:8px 12px;">{html.escape(l_str)}</td>
       </tr>
       <tr>
-        <td style="padding:8px 12px;color:#94a3b8;border-bottom:1px solid #334155;">Activity count</td>
-        <td style="padding:8px 12px;color:#f8fafc;border-bottom:1px solid #334155;">{html.escape(str(details.get('count', 'N/A')))}</td>
+        <th scope="row" style="padding:8px 0;text-align:left;vertical-align:top;">Activity count</th>
+        <td style="padding:8px 12px;">{html.escape(str(details.get('count', 'N/A')))}</td>
       </tr>
       <tr>
-        <td style="padding:8px 12px;color:#94a3b8;border-bottom:1px solid #334155;">Rule threshold</td>
-        <td style="padding:8px 12px;color:#f8fafc;border-bottom:1px solid #334155;">{html.escape(str(details.get('limit', 'N/A')))}</td>
+        <th scope="row" style="padding:8px 0;text-align:left;vertical-align:top;">Rule threshold</th>
+        <td style="padding:8px 12px;">{html.escape(str(details.get('limit', 'N/A')))}</td>
       </tr>
     </table>
 
-    <p style="font-size:13px;color:#94a3b8">Source IPs: {html.escape(', '.join(details.get('source_ips', [])) or 'Not available')}<br>Sample document IDs: {html.escape(', '.join(map(str, details.get('documents', []))) or 'Not available')}</p>
-    <p style="font-size:12px;color:#94a3b8">Coverage: Therefore Console messages only; this is not a complete audit trail or an exact HTTP call count.</p>
+    <p>Source IPs: {html.escape(', '.join(details.get('source_ips', [])) or 'Not available')}<br>Sample document IDs: {html.escape(', '.join(map(str, details.get('documents', []))) or 'Not available')}</p>
+    <p style="font-size:13px;">Coverage: Therefore Console messages only; this is not a complete audit trail or an exact HTTP call count.</p>
     {html_link}
 
-    <p style="font-size:12px;color:#64748b;margin-top:24px;border-top:1px solid #334155;padding-top:16px;">
+    <p style="font-size:13px;margin-top:24px;border-top:1px solid #cccccc;padding-top:16px;">
       This alert was generated automatically by the Therefore Log Auditor live security monitor.
       Suspected bulk activity represents unusual volume or patterns and should be investigated in context.
     </p>
