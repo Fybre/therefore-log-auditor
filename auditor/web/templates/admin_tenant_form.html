@@ -15,7 +15,7 @@
 <p style="color: {{ 'var(--good)' if test_result.ok else 'var(--high)' }}">{{ test_result.message }}</p>
 {% endif %}
 {% if category_matches %}
-<div class="card" style="max-width:520px">
+<div class="card">
   <table>
     <tr><th>Category</th><th>Name</th></tr>
     {% for c in category_matches %}
@@ -26,7 +26,7 @@
 </div>
 {% endif %}
 <form class="card" method="post" action="{{ '/admin/tenants/' ~ t ~ '/edit' if t else '/admin/tenants/new' }}"
-      style="display:flex;flex-direction:column;gap:10px;max-width:520px">
+      style="display:flex;flex-direction:column;gap:10px">
   {% if t %}<input type="hidden" name="tenant_id" value="{{ t }}">{% endif %}
   {% if not t %}
   <label>Tenant ID (used in URLs, e.g. "craigdemo")</label>
@@ -94,14 +94,14 @@
   </div>
 </form>
 {% if t %}
-<form method="post" action="/admin/tenants/{{ t }}/run" class="card" style="max-width:520px">
+<form method="post" action="/admin/tenants/{{ t }}/run" class="card">
   <h2 style="margin-top:0">Run now</h2>
   <p class="muted">Collect new logs, run rules, triage and send today's digest right now,
     outside {{ t }}'s cron schedule.</p>
   <button type="submit" style="padding:8px 18px;background:var(--ink);color:#fff;border:none;border-radius:4px;cursor:pointer">Run {{ t }} now</button>
 </form>
 
-<div class="card" style="max-width:520px">
+<div class="card">
   <h2 style="margin-top:0">Server logging settings</h2>
   {% if log_settings %}
   <p class="muted" style="margin-top:0">Read from {{ t }}'s own Solution Designer &gt; Settings &gt;
@@ -142,7 +142,7 @@
   {% endif %}
 </div>
 
-<form method="post" action="/admin/tenants/{{ t }}/delete" class="card" style="max-width:520px">
+<form method="post" action="/admin/tenants/{{ t }}/delete" class="card">
   <h2 style="margin-top:0">Delete tenant</h2>
   <p class="muted">Deletes the tenant's config only. Collected logs/findings for {{ t }} stay in the
     database. Type <code>{{ t }}</code> to confirm.</p>

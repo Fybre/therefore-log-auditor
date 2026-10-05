@@ -2,7 +2,7 @@
 {% block title %}Live security — {{ tenant.id }}{% endblock %}
 {% block content %}
 <div class="live-heading"><h1>Live security — {{ tenant.id }}</h1><a href="/admin/tenants/{{ tenant.id }}/live">Tenant configuration</a></div>
-<p class="muted">Shadow mode: monitoring and findings only. Security notifications are not sent.</p>
+<p class="muted">{% if options.alerting_enabled %}Security email notifications enabled. Delivery status is shown with each finding.{% else %}Shadow mode: monitoring and findings only. Automatic security notifications are not sent.{% endif %}</p>
 {% include 'live_results.html' %}
 <p><a href="/t/{{ tenant.id }}/findings">Archived-log findings</a> · <span id="live-refresh" class="muted">Updates automatically every 10 seconds</span></p>
 <script>

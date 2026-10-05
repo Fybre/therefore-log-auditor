@@ -1,4 +1,4 @@
-"""Authenticated shadow-monitoring dashboard and scoped workload approvals."""
+"""Authenticated live dashboard, scoped workload approvals and opt-in notifications."""
 import datetime as dt
 from zoneinfo import ZoneInfo
 from psycopg.types.json import Jsonb
@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from .. import audit, config
 from ..web import auth
 from .detection import validate_approval
+from .outbox import parse_recipients
 
 
 def register(app, db_conn):
@@ -46,7 +47,8 @@ def register(app, db_conn):
         with conn.cursor() as cur:
             cur.execute('SELECT * FROM live_settings WHERE tenant_id=%s', (tenant_id,))
             options = cur.fetchone() or {'enabled': False, 'retrieval_limit':100, 'api_limit':500,
-                                         'poll_interval_seconds':15}
+                                         'poll_interval_seconds':15, 'alerting_enabled':False,
+                                         'alert_recipients':''}
             cur.execute('SELECT * FROM live_state WHERE tenant_id=%s', (tenant_id,))
             state = cur.fetchone()
             now = dt.datetime.now(dt.timezone.utc)
@@ -59,11 +61,21 @@ def register(app, db_conn):
             cur.execute('''SELECT event_time, received_at, payload, activity FROM live_observations
                            WHERE tenant_id=%s ORDER BY id DESC LIMIT 25''', (tenant_id,))
             messages = cur.fetchall()
-            cur.execute('''SELECT * FROM live_findings WHERE tenant_id=%s AND (%s OR NOT expected)
-                           ORDER BY last_ts DESC LIMIT 100''', (tenant_id, expected))
+            cur.execute('''SELECT f.*,n.status AS alert_status,n.sent_at AS alert_sent_at,
+                           n.alert_type,n.attempts,n.max_attempts FROM live_findings f
+                           LEFT JOIN LATERAL (SELECT * FROM live_outbox o WHERE o.tenant_id=f.tenant_id
+                               AND o.finding_id=f.id ORDER BY o.id DESC LIMIT 1) n ON true
+                           WHERE f.tenant_id=%s AND (%s OR NOT f.expected)
+                           ORDER BY f.last_ts DESC LIMIT 100''', (tenant_id, expected))
             findings = cur.fetchall()
             cur.execute('SELECT * FROM live_approvals WHERE tenant_id=%s ORDER BY id DESC', (tenant_id,))
             approvals = cur.fetchall()
+            recent_alerts = []
+            if request.url.path.startswith('/admin/'):
+                cur.execute('''SELECT id,finding_id,created_at,alert_type,severity,recipients,status,
+                               attempts,max_attempts,next_attempt_at,sent_at,last_error
+                               FROM live_outbox WHERE tenant_id=%s ORDER BY id DESC LIMIT 25''', (tenant_id,))
+                recent_alerts = cur.fetchall()
         if not tenant.enabled or not options['enabled']:
             status, status_note = 'Collection disabled', 'Enable collection in tenant configuration to start receiving messages.'
         elif state and state['last_error']:
@@ -99,6 +111,7 @@ def register(app, db_conn):
             'prefill': prefill, 'source_finding': source_finding, 'source_ips': source_ips,
             'collection': collection, 'messages': messages, 'status': status, 'status_note': status_note,
             'state': state, 'stale': stale, 'pending': pending, 'findings': findings, 'approvals': approvals, 'expected': expected,
+            'recent_alerts':recent_alerts,
             'deployment_warnings': app.state.deployment_warnings, 'static_version': app.state.static_version})
 
     @app.post('/admin/tenants/{tenant_id}/live/settings')
@@ -129,6 +142,54 @@ def register(app, db_conn):
                          {'enabled':enabled, 'retrieval_limit':retrieval, 'api_limit':api,
                           'poll_interval_seconds':poll_interval})
         return RedirectResponse(f'/admin/tenants/{tenant_id}/live', status_code=303)
+
+    @app.post('/admin/tenants/{tenant_id}/live/notifications')
+    async def notification_settings(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        check_origin(request)
+        tenant = tenant_or_404(conn, tenant_id)
+        form = await request.form()
+        enabled = form.get('alerting_enabled') == 'on'
+        custom = str(form.get('alert_recipients', '')).strip()
+        try:
+            recipients = parse_recipients(custom, tenant.digest.get('email_to', []) if enabled else [])
+            if enabled and not recipients:
+                raise ValueError('Set custom alert recipients or tenant digest recipients before enabling notifications.')
+        except ValueError as exc:
+            raise HTTPException(422, str(exc))
+        with conn.cursor() as cur:
+            cur.execute('''INSERT INTO live_settings(tenant_id,alerting_enabled,alert_recipients,alerting_enabled_at)
+                VALUES (%s,%s,%s,CASE WHEN %s THEN now() END)
+                ON CONFLICT(tenant_id) DO UPDATE SET alerting_enabled=EXCLUDED.alerting_enabled,
+                alert_recipients=EXCLUDED.alert_recipients,
+                alerting_enabled_at=CASE WHEN EXCLUDED.alerting_enabled AND NOT live_settings.alerting_enabled
+                    THEN now() ELSE live_settings.alerting_enabled_at END''',
+                (tenant_id, enabled, custom, enabled))
+        audit.log_action(conn, auth.current_user(request).username, 'live.notifications', tenant_id,
+                         {'enabled':enabled, 'recipients':custom})
+        return RedirectResponse(f'/admin/tenants/{tenant_id}/live#security-notifications', status_code=303)
+
+    @app.post('/admin/tenants/{tenant_id}/live/test-alert')
+    async def test_alert(request: Request, tenant_id: str, conn=Depends(db_conn)):
+        check_origin(request)
+        tenant = tenant_or_404(conn, tenant_id)
+        with conn.cursor() as cur:
+            cur.execute('SELECT alert_recipients FROM live_settings WHERE tenant_id=%s', (tenant_id,))
+            options = cur.fetchone() or {}
+            try:
+                recipients = parse_recipients(options.get('alert_recipients',''), tenant.digest.get('email_to',[]))
+                if not recipients:
+                    raise ValueError('Save custom alert recipients or tenant digest recipients first.')
+            except ValueError as exc:
+                raise HTTPException(422, str(exc))
+            # Delivery uses the same durable queue; the HTTP request never waits for SMTP.
+            cur.execute('''INSERT INTO live_outbox(tenant_id,alert_type,severity,recipients,subject,body_text,body_html)
+                VALUES (%s,'test','info',%s,%s,%s,'') RETURNING id''',
+                (tenant_id, recipients, f'[Therefore Security Test] {tenant_id}',
+                 f'Test security notification for {tenant_id}. No security incident triggered this message.'))
+            alert_id = cur.fetchone()['id']
+        audit.log_action(conn, auth.current_user(request).username, 'live.test_alert', tenant_id,
+                         {'outbox_id':alert_id, 'recipients':recipients})
+        return RedirectResponse(f'/admin/tenants/{tenant_id}/live#security-alerts', status_code=303)
 
     @app.post('/admin/tenants/{tenant_id}/live/approvals')
     @app.post('/t/{tenant_id}/live/approvals')

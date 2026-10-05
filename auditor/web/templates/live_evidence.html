@@ -13,7 +13,7 @@
 {% if finding.details.limit %}<div><span>Configured limit</span><strong>{{ '{:,}'.format(finding.details.limit) }}</strong><small>For the same activity window</small></div>{% endif %}
 <div><span>Last activity</span><strong class="live-date">{{ finding.last_ts | local_time(tenant.display_tz) }}</strong><small>{{ tenant.display_tz }}</small></div>
 </div>
-<p class="muted">First detected {{ finding.first_ts | local_time(tenant.display_tz) }} · Shadow mode</p>
+<p class="muted">First detected {{ finding.first_ts | local_time(tenant.display_tz) }}</p>
 {% if finding.details.approval_name %}<p>Approval: {{ finding.details.approval_name }}</p>{% endif %}
 {% if not finding.expected and finding.rule_id in ['retrieval_burst', 'api_activity_burst'] %}
 <div class="evidence-approval"><a class="btn evidence-approve" href="/admin/tenants/{{ tenant.id }}/live?from_finding={{ finding.id }}#approve-workload">Approve this activity</a><span class="muted">Review the prefilled account, source and limits before saving.</span></div>

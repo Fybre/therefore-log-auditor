@@ -354,6 +354,7 @@ tr.group-row > td { padding-top: 9px; padding-bottom: 9px; }
 .live-heading { display:flex; justify-content:space-between; align-items:baseline; gap:16px; flex-wrap:wrap; }
 #live-results > .card { margin-bottom: 0; }
 .live-section { margin-top: 24px; display: flow-root; }
+.live-notification { margin-top: 8px; font-size: 12px; }
 .live-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:24px; margin:24px 0 12px; }
 .live-metrics span, .live-metrics small { display:block; color:var(--text-muted); }
 .live-metrics strong { display:block; font-size:32px; margin:8px 0; }

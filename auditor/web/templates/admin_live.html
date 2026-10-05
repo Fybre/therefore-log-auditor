@@ -3,7 +3,7 @@
 {% block content %}
 <p><a href="/admin/tenants/{{ tenant.id }}/edit">← Tenant configuration</a> · <a href="/t/{{ tenant.id }}/live">View live security</a></p>
 <h1>Live monitoring settings — {{ tenant.id }}</h1>
-<p class="muted">Shadow mode: activity and findings are recorded, but security notifications are not sent.</p>
+<p class="muted">{% if options.alerting_enabled %}Security email notifications are enabled. Collection must also be enabled for automatic alerts.{% else %}Shadow mode: activity and findings are recorded, but automatic security notifications are not sent.{% endif %}</p>
 <section class="card"><h2>Collection and thresholds</h2>
 <form class="live-config-form" method="post" action="/admin/tenants/{{ tenant.id }}/live/settings">
 <label class="live-check"><input type="checkbox" name="enabled" {% if options.enabled %}checked{% endif %}> Enable live collection</label>
@@ -14,7 +14,24 @@
 </form>
 <p class="muted">Check for new messages every 5–60 seconds, plus processing time. Default: 15 seconds. Changes apply automatically on the worker's next cycle. Recovery snapshots remain approximately every 60 seconds.</p>
 <p class="muted">The live worker must be running. API activity includes explicitly labelled successful API connections/completed operations; it is not an exact HTTP call count. Retrieval detection does not require API attribution.</p>
-</section><section class="card"><h2 id="approve-workload">Approve a bulk workload</h2>
+</section>
+<section class="card" id="security-notifications"><h2>Security notifications</h2>
+<form class="live-config-form" method="post" action="/admin/tenants/{{ tenant.id }}/live/notifications">
+<label class="live-check"><input type="checkbox" name="alerting_enabled" {% if options.alerting_enabled %}checked{% endif %}> Enable security notifications (email alerts)</label>
+<label>Custom alert recipients <textarea name="alert_recipients" rows="3" placeholder="security@example.com">{{ options.alert_recipients }}</textarea></label>
+<button>Save notifications</button>
+</form>
+<p class="muted">Separate addresses with commas or new lines. Leave blank to use tenant digest recipients: {{ tenant.digest.get('email_to', []) | join(', ') or 'none configured' }}.</p>
+<p class="muted">One initial email per finding episode. Further emails require at least 15 minutes and either doubled activity or higher severity. Expected activity and historical replay do not alert. Disabling notifications cancels queued automatic alerts when checked for delivery; a send already in progress can still finish.</p>
+<form method="post" action="/admin/tenants/{{ tenant.id }}/live/test-alert"><button type="submit">Send test security email</button></form>
+<p class="muted">Uses saved recipients and SMTP settings. A test email is queued immediately, even in shadow mode; the live worker delivers it. Save changes before testing.</p>
+<h2 id="security-alerts">Recent security alerts</h2>
+<p><a href="#security-alerts" onclick="window.location.reload(); return false;">Refresh delivery status</a></p>
+<div class="table-scroll"><table><tr><th>Queued</th><th>Alert</th><th>Recipients</th><th>Delivery</th><th>Attempts</th></tr>
+{% for a in recent_alerts %}<tr><td>{{ a.created_at | local_time(tenant.display_tz) }}</td><td>{{ a.alert_type | capitalize }} · {{ a.severity }}{% if a.finding_id %}<br><a href="/t/{{ tenant.id }}/live/findings/{{ a.finding_id }}">Finding #{{ a.finding_id }}</a>{% endif %}</td><td>{{ a.recipients | join(', ') }}</td><td><span class="pill">{{ a.status | capitalize }}</span>{% if a.sent_at %}<br>{{ a.sent_at | local_time(tenant.display_tz) }}{% elif a.status == 'failed' %}<br>{{ a.last_error }}<br>{% if a.attempts < a.max_attempts %}Retry: {{ a.next_attempt_at | local_time(tenant.display_tz) }}{% else %}Retries exhausted{% endif %}{% elif a.status == 'cancelled' %}<br>{{ a.last_error }}{% endif %}</td><td>{{ a.attempts }} / {{ a.max_attempts }}</td></tr>{% else %}<tr><td colspan="5" class="muted">No security emails queued yet.</td></tr>{% endfor %}
+</table></div>
+</section>
+<section class="card"><h2 id="approve-workload">Approve a bulk workload</h2>
 {% if source_finding %}<p>Prefilled from finding #{{ source_finding.id }}. Review the scope and suggested one-hour window, then add a reason. The volume limit starts at the observed count.</p>{% if not prefill.network %}<p class="muted">Evidence has multiple or missing source IPs. Choose the intended IP/network; no broad network has been assumed. Observed IPs: {{ source_ips | join(", ") or "none" }}.</p>{% endif %}{% endif %}
 <p>All restrictions must match. Only the selected bulk rule is affected; login detections remain active. Approvals apply to subsequent evaluations. An existing finding changes only when you explicitly mark the selected finding as expected. Earliest matching approval wins when scopes overlap; limits are never added together.</p>
 <form class="live-config-form" method="post" action="/admin/tenants/{{ tenant.id }}/live/approvals">

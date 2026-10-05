@@ -116,7 +116,7 @@ TEST_DATABASE_URL=postgresql://.../auditor_test pytest -q
   the UI, Postgres row-level security per tenant (all dashboard accounts currently see all
   tenants - fine for a single-operator deployment, not yet for multiple customers/teams).
 
-## Live security pilot (shadow mode)
+## Live security monitoring and notifications
 
 An opt-in Console collector now records live observations separately from archived logs.
 It detects credential failures (5/account/15 minutes), password spray (3 accounts/IP/60 minutes),
@@ -139,8 +139,21 @@ and finding updates, and maintains collection totals in the same database transa
 late messages and approval changes rebuild the necessary context from stored observations.
 See [live processing](docs/live-processing.md) for recovery behavior and validation.
 
-**No live security emails are sent in this increment.** Review findings and raw evidence on the
-Live security page; the daily archive pipeline/digests are unchanged. Initial/recovery backlog is
+**Security emails are opt-in and disabled by default.** In tenant **Live monitoring settings →
+Security notifications**, save custom recipients or leave them blank to use tenant digest recipients,
+then enable notifications. The existing SMTP configuration is used. **Send test security email**
+queues an explicit test to the saved recipients even in shadow mode; the live worker must be running.
+Delivery and retry status appear in **Recent security alerts** and beside findings.
+
+One initial email is queued per unexpected finding episode. Routine activity updates that episode;
+an escalation requires at least 15 minutes since the previous queued alert and either doubled volume
+or increased severity. Activity after more than 30 minutes of inactivity begins a new episode.
+Historical replay and expected activity do not generate automatic emails. Disabling notifications,
+disabling collection, or marking a finding expected cancels queued automatic alerts when dispatched;
+a send already in progress may finish. Queued tests are explicit requests and still deliver.
+See [notification delivery](docs/live-notifications.md) for retry and crash behavior.
+
+Review findings and raw evidence on the Live security page; the daily archive pipeline/digests are unchanged. Initial/recovery backlog is
 also evaluated and may produce historical shadow findings. Known-user/IP blanket suppressions
 from archive rules do not suppress live security findings.
 
@@ -165,7 +178,7 @@ Current pilot boundaries:
 - Use **Last successful poll** and **Last evaluation** to check freshness; errors and suspected gaps
   remain visible. The server backlog is bounded, so recovery cannot promise complete coverage.
 - No archive reconciliation, automatic blocking, recurring approval schedules, category-specific
-  approvals, learned baselines, notification outbox or automatic retention pruning yet. Raw
+  approvals, learned baselines or automatic retention pruning yet. Raw
   observations and supporting evidence currently remain in Postgres; monitor storage in the pilot.
 - No live tenant was contacted to validate this implementation. Console 35.0.3 and ASCII passwords
   are the established upstream protocol scope; validate your tenant in shadow mode first.

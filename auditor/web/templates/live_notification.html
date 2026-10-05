@@ -1,0 +1,9 @@
+<div class="live-notification muted">
+{% if f.alert_status == 'sent' %}<span class="pill">{{ 'Escalation sent' if f.alert_type == 'escalation' else 'Alert sent' }}</span> {{ f.alert_sent_at | local_time(tenant.display_tz) }}
+{% elif f.alert_status == 'failed' %}<span class="pill">Delivery failed</span> {{ 'Retry scheduled' if f.attempts < f.max_attempts else 'Retries exhausted' }}
+{% elif f.alert_status == 'pending' %}<span class="pill">{{ 'Escalation queued' if f.alert_type == 'escalation' else 'Alert queued' }}</span>
+{% elif f.alert_status == 'cancelled' %}<span class="pill">Alert cancelled</span>
+{% elif f.expected %}No alert · Expected activity
+{% elif not options.alerting_enabled %}Shadow · No alert
+{% else %}No alert queued{% endif %}
+</div>

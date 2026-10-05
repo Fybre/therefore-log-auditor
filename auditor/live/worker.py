@@ -1,4 +1,4 @@
-"""Opt-in shadow collector. No outbound alerts or administrative server commands."""
+"""Opt-in Console collector and independent security email dispatcher."""
 import hashlib
 import logging
 import signal
@@ -11,6 +11,7 @@ from ..db import connect, migrate
 from .protocol import Client, ResultError
 from .store import ingest, evaluate
 from .rolling import EvaluationCache
+from .outbox import dispatch_outbox_batch
 
 log = logging.getLogger(__name__)
 
@@ -74,7 +75,8 @@ def collect_tenant(settings, tenant_id, stop):
                             ingest(conn, tenant_id, endpoint, events, snapshot, tenant.log_tz)
                         # Independent transaction: an evaluation failure cannot lose collected events.
                         with conn.transaction():
-                            evaluate(conn, tenant_id, options['retrieval_limit'], options['api_limit'], cache)
+                            evaluate(conn, tenant_id, options['retrieval_limit'], options['api_limit'],
+                                     cache, settings.dashboard_url if settings else '')
                         if snapshot:
                             last_snapshot = time.monotonic()
                         snapshot_due, failures = False, 0
@@ -106,6 +108,19 @@ def collect_tenant(settings, tenant_id, stop):
             stop.wait(10)
 
 
+def dispatch_worker(settings, stop):
+    while not stop.is_set():
+        try:
+            with connect(settings.database_url) as conn:
+                while not stop.is_set():
+                    n = dispatch_outbox_batch(conn, settings, batch_size=10, stop=stop)
+                    if n == 0:
+                        stop.wait(5)
+        except Exception as exc:
+            log.warning('Live outbox dispatcher unavailable: %s', type(exc).__name__)
+            stop.wait(10)
+
+
 def serve(settings):
     stop = threading.Event()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -113,6 +128,8 @@ def serve(settings):
     with connect(settings.database_url) as conn:
         migrate(conn)
     workers = {}
+    dispatcher = threading.Thread(target=dispatch_worker, args=(settings, stop), daemon=True)
+    dispatcher.start()
     try:
         while not stop.is_set():
             try:
@@ -138,3 +155,4 @@ def serve(settings):
             worker_stop.set()
         for thread, _ in workers.values():
             thread.join(timeout=50)
+        dispatcher.join(timeout=10)
