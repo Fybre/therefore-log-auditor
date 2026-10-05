@@ -168,6 +168,11 @@ choose **Approve this activity** to prefill a scoped approval, review the sugges
 and observed volume, and add a reason. An optional checkbox marks that selected finding expected;
 the review is audited and other findings remain unchanged. Multiple or missing source IPs require
 an explicit network choice. General error messages and login findings do not create bulk approvals.
+The findings table separates **Inspect**, **Approve**, and **Quick approval**. Quick approval
+immediately marks only the selected finding as OK/expected and records the reviewer in the audit
+log. It creates no future allowance: new activity is still evaluated normally. Use **Show expected
+activity** to see reviewed findings; queued automatic emails for an expected finding are cancelled
+when the dispatcher checks it.
 
 Current pilot boundaries:
 

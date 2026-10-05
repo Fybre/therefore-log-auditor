@@ -1,0 +1,17 @@
+<p>Approval for <strong>{{ source_finding.subject }}</strong>. Review the suggested one-hour window and activity limit.</p>
+{% if not prefill.network %}<p class="muted">Choose a source IP/network. Observed IPs: {{ source_ips | join(', ') or 'none' }}.</p>{% endif %}
+<form class="live-config-form" method="post" action="/admin/tenants/{{ tenant.id }}/live/approvals">
+<input type="hidden" name="from_finding" value="{{ source_finding.id }}">
+<label>Name <input name="name" type="text" value="{{ prefill.name }}" maxlength="500" required></label>
+<label>Account <input name="username" type="text" value="{{ prefill.username }}" required></label>
+<label>Source IP or CIDR <input name="network" type="text" value="{{ prefill.network }}" required></label>
+<label>Activity <select name="kind"><option value="retrieval" {% if prefill.kind == 'retrieval' %}selected{% endif %}>Document retrieval</option><option value="api_activity" {% if prefill.kind == 'api_activity' %}selected{% endif %}>Observed API activity</option></select></label>
+<label>Start (time with UTC offset) <input name="starts_at" type="text" value="{{ prefill.starts_at }}" required></label>
+<label>Expiry (time with UTC offset) <input name="ends_at" type="text" value="{{ prefill.ends_at }}" required></label>
+<label>Maximum per 5 minutes <input name="max_count" type="number" min="1" max="2147483647" value="{{ prefill.max_count }}" required></label>
+<label>Reason <input name="reason" type="text" maxlength="500" required></label>
+<label class="live-check"><input type="checkbox" name="mark_expected"> Also mark this finding as expected</label>
+<p class="approval-wide muted">All restrictions must match. Future activity outside this approval is still checked.</p>
+<p class="approval-wide error" data-approval-error role="alert" hidden></p>
+<div class="approval-wide approval-buttons"><button type="submit" class="live-action">Save approval</button><button type="button" class="live-action" data-approval-close>Cancel</button></div>
+</form>

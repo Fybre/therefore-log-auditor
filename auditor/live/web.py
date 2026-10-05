@@ -40,6 +40,7 @@ def register(app, db_conn):
             raise HTTPException(403, 'Cross-origin request rejected')
 
     @app.get('/admin/tenants/{tenant_id}/live')
+    @app.get('/t/{tenant_id}/live/approval-form')
     @app.get('/t/{tenant_id}/live/fragment')
     @app.get('/t/{tenant_id}/live')
     def page(request: Request, tenant_id: str, expected: bool = False, from_finding: int | None = None, conn=Depends(db_conn)):
@@ -89,7 +90,9 @@ def register(app, db_conn):
         prefill = {}
         source_finding = None
         source_ips = []
-        if from_finding is not None and request.url.path.startswith('/admin/'):
+        if request.url.path.endswith('/approval-form') and from_finding is None:
+            raise HTTPException(422, 'Choose a finding to approve.')
+        if from_finding is not None and (request.url.path.startswith('/admin/') or request.url.path.endswith('/approval-form')):
             source_finding = bulk_finding(conn, tenant_id, from_finding)
             with conn.cursor() as cur:
                 cur.execute('''SELECT DISTINCT activity->>'ip' AS ip FROM live_observations
@@ -106,6 +109,8 @@ def register(app, db_conn):
         template = 'admin_live.html' if request.url.path.startswith('/admin/') else 'live.html'
         if request.url.path.endswith('/fragment'):
             template = 'live_results.html'
+        elif request.url.path.endswith('/approval-form'):
+            template = 'live_approval_form.html'
         return templates.TemplateResponse(request, template, {
             'user': auth.current_user(request), 'tenant': tenant, 'options': options,
             'prefill': prefill, 'source_finding': source_finding, 'source_ips': source_ips,
@@ -191,6 +196,28 @@ def register(app, db_conn):
                          {'outbox_id':alert_id, 'recipients':recipients})
         return RedirectResponse(f'/admin/tenants/{tenant_id}/live#security-alerts', status_code=303)
 
+    @app.post('/t/{tenant_id}/live/findings/{finding_id}/quick-approve')
+    def quick_approve(request: Request, tenant_id: str, finding_id: int, expected: bool = False, conn=Depends(db_conn)):
+        check_origin(request)
+        tenant_or_404(conn, tenant_id)
+        actor = auth.current_user(request).username
+        with conn.cursor() as cur:
+            cur.execute('SELECT * FROM live_findings WHERE tenant_id=%s AND id=%s FOR UPDATE',
+                        (tenant_id, finding_id))
+            finding = cur.fetchone()
+            if not finding:
+                raise HTTPException(404, 'Finding not found')
+            if not finding['expected']:
+                review = {'actor':actor, 'reason':'Quick approval of this finding only',
+                          'at':dt.datetime.now(dt.timezone.utc).isoformat(),
+                          'previous_expected':False, 'kind':'quick_approval'}
+                details = {**finding['details'], 'manual_review':review}
+                cur.execute('''UPDATE live_findings SET expected=true,details=%s,updated_at=now()
+                               WHERE tenant_id=%s AND id=%s''', (Jsonb(details), tenant_id, finding_id))
+                audit.log_action(conn, actor, 'live.finding.quick_approve', tenant_id,
+                                 {'finding_id':finding_id, 'scope':'finding_only'})
+        return RedirectResponse(f'/t/{tenant_id}/live?expected={str(expected).lower()}#live-findings', status_code=303)
+
     @app.post('/admin/tenants/{tenant_id}/live/approvals')
     @app.post('/t/{tenant_id}/live/approvals')
     async def approve(request: Request, tenant_id: str, conn=Depends(db_conn)):
@@ -229,6 +256,8 @@ def register(app, db_conn):
         audit.log_action(conn, actor, 'live.approval.create', tenant_id, {'id':approval_id, 'from_finding': source_finding['id'] if source_finding else None,
             'marked_expected': bool(source_finding and form.get('mark_expected') == 'on'), **{
             k:str(v) for k,v in values.items()}})
+        if 'application/json' in request.headers.get('accept', ''):
+            return {'ok':True, 'approval_id':approval_id}
         return RedirectResponse(f'/admin/tenants/{tenant_id}/live', status_code=303)
 
     @app.post('/admin/tenants/{tenant_id}/live/approvals/{approval_id}/revoke')

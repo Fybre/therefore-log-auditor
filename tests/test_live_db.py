@@ -94,6 +94,40 @@ def test_lock_excludes_other_worker(conn):
         assert other.execute('SELECT pg_try_advisory_lock(%s) ok',(lock_key('b'),)).fetchone()['ok']
 
 
+def test_quick_approval_is_scoped_audited_and_idempotent(conn, monkeypatch):
+    from fastapi.testclient import TestClient
+    from auditor.web.app import create_app
+    from auditor.config import Settings
+    monkeypatch.setenv('AUDITOR_WEB_USER','test')
+    monkeypatch.setenv('AUDITOR_WEB_PASSWORD','pw')
+    monkeypatch.setenv('AUDITOR_WEB_SECRET','test-secret')
+    ids = []
+    for tenant in ('a','a','b'):
+        ids.append(conn.execute("""INSERT INTO live_findings
+            (tenant_id,rule_id,subject,first_ts,last_ts,details)
+            VALUES (%s,'retrieval_burst','alice',now(),now(),'{"count":100}') RETURNING id""", (tenant,)).fetchone()['id'])
+    conn.commit()
+    url = f'/t/a/live/findings/{ids[0]}/quick-approve'
+    with TestClient(create_app(Settings(DB,[],{},'','','',{},None))) as client:
+        assert client.post(url,follow_redirects=False).status_code == 303
+        client.post('/login',data={'username':'test','password':'pw','next':'/'})
+        assert client.post(url,headers={'origin':'https://evil.example'}).status_code == 403
+        assert client.post(f'/t/a/live/findings/{ids[2]}/quick-approve').status_code == 404
+        page = client.get('/t/a/live').text
+        assert '<th>Evidence</th><th>Approve</th><th>Quick approval</th>' in page
+        assert client.post(url,follow_redirects=False).status_code == 303
+        assert client.post(url,follow_redirects=False).status_code == 303
+        row = conn.execute('SELECT expected,details FROM live_findings WHERE id=%s',(ids[0],)).fetchone()
+        assert row['expected']
+        assert row['details']['manual_review']['actor'] == 'test'
+        assert row['details']['manual_review']['kind'] == 'quick_approval'
+        assert conn.execute('SELECT count(*) n FROM live_approvals').fetchone()['n'] == 0
+        assert conn.execute("SELECT count(*) n FROM admin_audit_log WHERE action='live.finding.quick_approve'").fetchone()['n'] == 1
+        assert conn.execute('SELECT count(*) n FROM live_findings WHERE NOT expected').fetchone()['n'] == 2
+        assert 'OK · Quick approval' in client.get('/t/a/live?expected=true').text
+        assert f'/findings/{ids[0]}/quick-approve' not in client.get('/t/a/live').text
+
+
 def test_dashboard_settings_approvals_and_evidence_access(conn,monkeypatch):
     from fastapi.testclient import TestClient
     from auditor.web.app import create_app
@@ -165,11 +199,18 @@ def test_dashboard_settings_approvals_and_evidence_access(conn,monkeypatch):
     assert prefill.status_code == 200
     assert 'value="alice"' in prefill.text and 'value="192.0.2.1"' in prefill.text
     assert 'name="mark_expected"' in prefill.text
+    modal = client.get(f"/t/a/live/approval-form?from_finding={f['id']}")
+    assert modal.status_code == 200 and '<html' not in modal.text
+    assert 'value="alice"' in modal.text and 'value="192.0.2.1"' in modal.text
+    assert client.get(f"/t/b/live/approval-form?from_finding={f['id']}").status_code == 404
+    assert client.get('/t/a/live/approval-form').status_code == 422
     assert client.get(f"/admin/tenants/b/live?from_finding={f['id']}").status_code == 404
     assert client.post('/admin/tenants/a/live/approvals', data={
         **payload, 'from_finding': f['id'], 'username': 'someone-else', 'mark_expected':'on'}).status_code == 422
-    assert client.post('/admin/tenants/a/live/approvals', data={
-        **payload, 'from_finding': f['id'], 'mark_expected':'on'}).status_code == 200
+    saved = client.post('/admin/tenants/a/live/approvals', data={
+        **payload, 'from_finding': f['id'], 'mark_expected':'on'}, headers={'Accept':'application/json'})
+    assert saved.status_code == 200 and saved.json()['ok'] is True
+    assert saved.json()['approval_id'] > 0
     reviewed = conn.execute('SELECT details FROM live_findings WHERE id=%s', (f['id'],)).fetchone()
     assert reviewed['details']['manual_review']['actor'] == 'test'
     conn.commit()

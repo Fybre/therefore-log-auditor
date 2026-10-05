@@ -15,6 +15,7 @@
 </div>
 <p class="muted">First detected {{ finding.first_ts | local_time(tenant.display_tz) }}</p>
 {% if finding.details.approval_name %}<p>Approval: {{ finding.details.approval_name }}</p>{% endif %}
+{% if finding.details.get('manual_review', {}).get('kind') == 'quick_approval' %}<p>Marked OK by {{ finding.details.manual_review.actor }} using Quick approval. This review applies to this finding only.</p>{% endif %}
 {% if not finding.expected and finding.rule_id in ['retrieval_burst', 'api_activity_burst'] %}
 <div class="evidence-approval"><a class="btn evidence-approve" href="/admin/tenants/{{ tenant.id }}/live?from_finding={{ finding.id }}#approve-workload">Approve this activity</a><span class="muted">Review the prefilled account, source and limits before saving.</span></div>
 {% endif %}

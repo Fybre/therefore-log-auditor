@@ -14,8 +14,15 @@
 <section class="live-section" aria-labelledby="live-findings">
 <h2 id="live-findings">Recent findings</h2>
 <p>{% if expected %}<a href="?expected=false">Hide expected activity</a>{% else %}<a href="?expected=true">Show expected activity</a>{% endif %}. Up to 100 most recent episodes. Historical startup messages may produce shadow findings.</p>
-<div class="table-scroll"><table><tr><th>Last activity</th><th>Rule</th><th>Subject</th><th>Count</th><th>Assessment</th><th>Evidence</th></tr>
-{% for f in findings %}<tr><td>{{ f.last_ts | live_time(tenant.display_tz) }}</td><td>{{ f.rule_id }}</td><td>{{ f.subject }}</td><td>{{ f.details.count }}</td><td>{% if f.expected %}Expected: {{ f.details.approval_name }}{% elif f.details.exceeded %}Approved workload exceeded limit{% else %}Needs investigation{% endif %}{% include 'live_notification.html' %}</td><td><a href="/t/{{ tenant.id }}/live/findings/{{ f.id }}">Inspect</a>{% if not f.expected and f.rule_id in ["retrieval_burst", "api_activity_burst"] %}<br><a href="/admin/tenants/{{ tenant.id }}/live?from_finding={{ f.id }}#approve-workload">Approve this activity</a>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No matching security findings. Collected messages are shown below.</td></tr>{% endfor %}</table></div>
+<p class="muted">Approve sets up an allowance for future bulk activity. Quick approval marks this finding as OK; new activity is still checked.</p>
+<div class="table-scroll"><table class="live-findings-table"><tr><th>Last activity</th><th>Rule</th><th>Subject</th><th>Count</th><th>Assessment</th><th>Evidence</th><th>Approve</th><th>Quick approval</th></tr>
+{% for f in findings %}<tr>
+<td>{{ f.last_ts | live_time(tenant.display_tz) }}</td><td>{{ f.rule_id }}</td><td>{{ f.subject }}</td><td>{{ f.details.count }}</td>
+<td>{% if f.expected and f.details.get('manual_review', {}).get('kind') == 'quick_approval' %}OK · Quick approval{% elif f.expected %}Expected: {{ f.details.approval_name }}{% elif f.details.exceeded %}Approved workload exceeded limit{% else %}Needs investigation{% endif %}{% include 'live_notification.html' %}</td>
+<td><a class="row-link" href="/t/{{ tenant.id }}/live/findings/{{ f.id }}">Inspect</a></td>
+<td>{% if not f.expected and f.rule_id in ['retrieval_burst', 'api_activity_burst'] %}<a class="btn live-action" data-approval-form="/t/{{ tenant.id }}/live/approval-form?from_finding={{ f.id }}" href="/admin/tenants/{{ tenant.id }}/live?from_finding={{ f.id }}#approve-workload">Approve</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+<td>{% if not f.expected %}<form method="post" action="/t/{{ tenant.id }}/live/findings/{{ f.id }}/quick-approve?expected={{ 'true' if expected else 'false' }}"><button class="live-action" type="submit" title="Mark this finding as OK without creating a future activity allowance">Quick approval</button></form>{% else %}<span class="pill">Approved</span>{% endif %}</td>
+</tr>{% else %}<tr><td colspan="8">No matching security findings. Collected messages are shown below.</td></tr>{% endfor %}</table></div>
 </section>
 <section class="live-section" aria-labelledby="live-messages-heading">
 <div class="live-heading"><h2 id="live-messages-heading">Recent messages</h2><span class="muted">Latest 25 received · {{ tenant.display_tz }}</span></div>
