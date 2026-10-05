@@ -1,35 +1,43 @@
 {% extends "base.html" %}
 {% block title %}Tenants admin - Therefore Log Auditor{% endblock %}
+{% block main_class %}tenant-admin{% endblock %}
 {% block content %}
 <h1>Tenants / servers</h1>
 <p><a class="row-link" href="/admin/tenants/new">+ Add tenant</a></p>
-<div class="table-scroll">
+<div class="table-scroll tenant-table">
 <table>
-  <tr><th>ID</th><th>Base URL</th><th>Schedule</th><th>LLM</th><th>Enabled</th><th>Last run</th><th></th></tr>
+  <tr><th>ID</th><th>Base URL</th><th>Schedule</th><th>LLM</th><th>Enabled</th><th>Live monitoring</th><th>Last run</th><th></th><th></th></tr>
   {% for t in tenants %}
   {% set h = health.get(t.id) %}
   <tr>
-    <td><a class="row-link" href="/admin/tenants/{{ t.id }}/edit">{{ t.id }}</a></td>
-    <td class="muted">{{ t.base_url }}</td>
-    <td class="muted">{{ t.schedule.daily | humanize_schedule }} ({{ t.display_tz }})</td>
-    <td class="muted">{{ "on" if t.llm.enabled else "off" }}</td>
-    <td>{% if t.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}</td>
-    <td class="muted" style="font-size:12.5px">
+    <td data-label="ID"><a class="row-link" href="/admin/tenants/{{ t.id }}/edit">{{ t.id }}</a></td>
+    <td data-label="Base URL" class="muted"><span class="tenant-url" title="{{ t.base_url }}">{{ t.base_url }}</span></td>
+    <td data-label="Schedule" class="muted">{{ t.schedule.daily | humanize_schedule }}<br>({{ t.display_tz }})</td>
+    <td data-label="LLM" class="muted">{{ "on" if t.llm.enabled else "off" }}</td>
+    <td data-label="Enabled">{% if t.enabled %}<span class="pill">enabled</span>{% else %}<span class="pill">disabled</span>{% endif %}</td>
+    <td data-label="Live monitoring">
+      {% if live.get(t.id) is sameas true %}<span class="pill" style="color:var(--good)">enabled</span>
+      {% elif live.get(t.id) is sameas false %}<span class="pill">disabled</span>
+      {% else %}<span class="muted">not configured</span>{% endif %}
+    </td>
+    <td data-label="Last run" class="muted" style="font-size:12.5px">
       {% if not h %}never run
       {% elif h.error %}<span style="color:var(--high)">failed {{ h.started_at | local_time(t.display_tz) }}</span>
       {% elif not h.finished_at %}<span style="color:var(--medium)">running since {{ h.started_at | local_time(t.display_tz) }}</span>
       {% else %}{{ h.finished_at | local_time(t.display_tz) }}
       {% endif %}
     </td>
-    <td style="text-align:right;white-space:nowrap">
+    <td data-label="Rules" class="tenant-actions">
       <a class="row-link muted" href="/admin/tenants/{{ t.id }}/rules">Rules</a>
-      <form method="post" action="/admin/tenants/{{ t.id }}/run" style="display:inline;margin-left:10px">
+    </td>
+    <td data-label="Run" class="tenant-actions">
+      <form method="post" action="/admin/tenants/{{ t.id }}/run">
         <button type="submit" style="background:none;border:1px solid var(--border-strong);border-radius:4px;padding:3px 10px;cursor:pointer;font-size:12.5px">Run now</button>
       </form>
     </td>
   </tr>
   {% else %}
-  <tr><td colspan="7" class="muted">No tenants configured yet.</td></tr>
+  <tr><td colspan="9" class="muted">No tenants configured yet.</td></tr>
   {% endfor %}
 </table>
 </div>

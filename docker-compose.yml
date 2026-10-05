@@ -30,6 +30,18 @@ services:
     restart: unless-stopped
     command: ["serve"]
 
+  live:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://auditor:${POSTGRES_PASSWORD:-auditor}@db:5432/auditor
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    command: ["live"]
+    profiles: ["live"]
+
   web:
     build: .
     env_file: .env

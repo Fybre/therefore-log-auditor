@@ -103,6 +103,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(SessionMiddleware, secret_key=auth.session_secret(), same_site="lax")
 
     register_routes(app)
+    from ..live.web import register as register_live
+    register_live(app, db_conn)
     return app
 
 
@@ -247,7 +249,14 @@ def register_routes(app: FastAPI) -> None:
                               count(*) FILTER (WHERE severity='low' AND status='open') AS low,
                               max(last_ts) AS last_finding
                        FROM findings WHERE tenant_id=%s""", (t.id,))
-                rows.append({"tenant": t, **cur.fetchone()})
+                row = {"tenant": t, **cur.fetchone()}
+                cur.execute("""SELECT count(*) AS live_issues, max(last_ts) AS last_live_issue
+                               FROM live_findings WHERE tenant_id=%s AND NOT expected""", (t.id,))
+                row.update(cur.fetchone())
+                cur.execute('SELECT enabled FROM live_settings WHERE tenant_id=%s', (t.id,))
+                live_setting = cur.fetchone()
+                row['live_enabled'] = bool(t.enabled and live_setting and live_setting['enabled'])
+                rows.append(row)
         return render(request, "tenants.html", {"rows": rows})
 
     @app.get("/t/{tenant_id}/findings")
@@ -501,13 +510,17 @@ def register_routes(app: FastAPI) -> None:
     def admin_tenants(request: Request, conn=Depends(db_conn)):
         tenants = cfg.load_tenants(conn, include_disabled=True)
         health = {}
+        live = {}
         with conn.cursor() as cur:
             for t in tenants:
                 cur.execute("""SELECT started_at, finished_at, error FROM runs
                                WHERE tenant_id=%s AND kind <> 'backfill'
                                ORDER BY started_at DESC LIMIT 1""", (t.id,))
                 health[t.id] = cur.fetchone()
-        return render(request, "admin_tenants.html", {"tenants": tenants, "health": health})
+                cur.execute("SELECT enabled FROM live_settings WHERE tenant_id=%s", (t.id,))
+                setting = cur.fetchone()
+                live[t.id] = None if setting is None else bool(setting["enabled"])
+        return render(request, "admin_tenants.html", {"tenants": tenants, "health": health, "live": live})
 
     @app.get("/admin/tenants/new")
     def admin_tenant_new_form(request: Request):

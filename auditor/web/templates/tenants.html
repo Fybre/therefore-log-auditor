@@ -3,12 +3,13 @@
 {% block content %}
 <h1>Tenants</h1>
 <p class="muted">Click a tenant's name to see all of its findings. Click a high/medium/low count
-  to jump straight to just those open findings. Click "Known activity" to see and manage that
+  to jump straight to just those open findings. Live issues counts security findings needing investigation,
+  excluding expected activity. Click its count to inspect them. Click "Known activity" to see and manage that
   tenant's allow-list - the users, IPs, and change windows already explained away, so they stop
   showing up as new every day.</p>
 <div class="table-scroll">
 <table>
-  <tr><th>Tenant</th><th>Open high</th><th>Open medium</th><th>Open low</th><th>Last finding</th><th>Known activity</th></tr>
+  <tr><th>Tenant</th><th>Open high</th><th>Open medium</th><th>Open low</th><th>Live issues</th><th>Last archive finding</th><th>Known activity</th><th>Live security</th></tr>
   {% for r in rows %}
   <tr>
     <td><a class="row-link" href="/t/{{ r.tenant.id }}/findings">{{ r.tenant.id }}</a></td>
@@ -27,8 +28,16 @@
         {% if r.low %}<span class="badge low">{{ r.low }}</span>{% else %}<span class="muted">0</span>{% endif %}
       </a>
     </td>
+    <td>
+      {% if r.live_enabled %}
+      <a class="row-link" href="/t/{{ r.tenant.id }}/live#live-findings" aria-label="{{ r.live_issues }} live security issues for {{ r.tenant.id }}"{% if r.last_live_issue %} title="Last live issue: {{ r.last_live_issue | local_time(r.tenant.display_tz) }}"{% endif %}>
+        {% if r.live_issues %}<span class="badge live-issue">{{ r.live_issues }}</span>{% else %}<span class="muted">0</span>{% endif %}
+      </a>
+      {% else %}<span class="muted" title="Live monitoring is not enabled" aria-label="Live monitoring is not enabled for {{ r.tenant.id }}">—</span>{% endif %}
+    </td>
     <td class="muted">{{ r.last_finding | local_time(r.tenant.display_tz) }}</td>
     <td><a class="row-link muted" href="/t/{{ r.tenant.id }}/known">Known activity</a></td>
+    <td><a class="row-link muted" href="/t/{{ r.tenant.id }}/live">Live security</a></td>
   </tr>
   {% endfor %}
 </table>

@@ -47,6 +47,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="one-time: import config/tenants.yaml + THEREFORE_<ID>_USERNAME/PASSWORD "
                          "and SMTP_* from .env into the database")
 
+    sub.add_parser("live", help="run opt-in live Console shadow collection (no notifications)")
+
     a = p.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -82,6 +84,11 @@ def main(argv: list[str] | None = None) -> int:
                            send_digest=a.llm, rules_from=dt.datetime.combine(since, dt.time(), dt.timezone.utc))
         print(json.dumps(stats, default=str, indent=1))
         return 0 if "error" not in stats else 1
+
+    if a.cmd == "live":
+        from .live.worker import serve
+        serve(settings)
+        return 0
 
     if a.cmd == "serve":
         from .scheduler import serve

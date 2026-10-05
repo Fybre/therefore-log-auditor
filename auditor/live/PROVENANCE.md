@@ -1,0 +1,1 @@
+Console Client and codec adapted from therefore-web-console revision e902bac254c4bc1ca0be6782e29f8b4a19d68bd2, server/protocol/therefore_monitor.py and therefore_crypto_codec.py. Retains read-only authentication/view polling; excludes standalone SQLite collector and command helpers. Protocol verified by upstream against Therefore 35.0.3. Non-ASCII credentials remain unverified.

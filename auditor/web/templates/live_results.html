@@ -1,0 +1,32 @@
+<div id="live-results">
+<section class="card" aria-labelledby="connection-heading">
+<h2 id="connection-heading">{{ status }}</h2>
+{% if status_note %}<p>{{ status_note }}</p>{% endif %}
+<div class="live-metrics">
+<div><span>Messages collected</span><strong>{{ '{:,}'.format(collection.total) }}</strong><small>Total stored for this tenant</small></div>
+<div><span>Last message received</span><strong class="live-date">{{ (collection.last_received | live_time(tenant.display_tz)) if collection.last_received else 'None yet' }}</strong><small>When the auditor received a message</small></div>
+<div><span>Last successful check</span><strong class="live-date">{{ (state.last_poll | live_time(tenant.display_tz)) if state and state.last_poll else 'Not connected yet' }}</strong><small>A successful check can return no new messages</small></div>
+</div>
+{% if state and state.last_error %}<p class="error">Worker error: {{ state.last_error }}</p>{% endif %}
+{% if pending %}<p>{{ pending }} collected messages are waiting to be analysed.</p>{% elif collection.total %}<p class="muted">All collected messages have been analysed.</p>{% endif %}
+<p><a href="?expected={{ 'true' if expected else 'false' }}">Refresh now</a></p>
+</section>
+<section class="live-section" aria-labelledby="live-findings">
+<h2 id="live-findings">Recent findings</h2>
+<p>{% if expected %}<a href="?expected=false">Hide expected activity</a>{% else %}<a href="?expected=true">Show expected activity</a>{% endif %}. Up to 100 most recent episodes. Historical startup messages may produce shadow findings.</p>
+<div class="table-scroll"><table><tr><th>Last activity</th><th>Rule</th><th>Subject</th><th>Count</th><th>Assessment</th><th>Evidence</th></tr>
+{% for f in findings %}<tr><td>{{ f.last_ts | live_time(tenant.display_tz) }}</td><td>{{ f.rule_id }}</td><td>{{ f.subject }}</td><td>{{ f.details.count }}</td><td>{% if f.expected %}Expected: {{ f.details.approval_name }}{% elif f.details.exceeded %}Approved workload exceeded limit{% else %}Needs investigation{% endif %}</td><td><a href="/t/{{ tenant.id }}/live/findings/{{ f.id }}">Inspect</a>{% if not f.expected and f.rule_id in ["retrieval_burst", "api_activity_burst"] %}<br><a href="/admin/tenants/{{ tenant.id }}/live?from_finding={{ f.id }}#approve-workload">Approve this activity</a>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No matching security findings. Collected messages are shown below.</td></tr>{% endfor %}</table></div>
+</section>
+<section class="live-section" aria-labelledby="live-messages-heading">
+<div class="live-heading"><h2 id="live-messages-heading">Recent messages</h2><span class="muted">Latest 25 received · {{ tenant.display_tz }}</span></div>
+{% if messages %}
+<div class="table-scroll"><table class="live-messages"><tr><th>Event time</th><th>Account</th><th>Operation / stage</th><th>Message</th></tr>
+{% for m in messages %}<tr><td>{{ m.event_time | live_time(tenant.display_tz) }}</td><td>{{ m.payload.get('User', '') }}</td><td>{{ m.activity.operation or ('Operation ' ~ m.payload.get('Oper', '?')) }}{% if m.activity.stage != 'unknown' %}<br><span class="muted">{{ m.activity.stage }}</span>{% endif %}</td><td>{% set message = m.payload.get('Text', '') or '' %}{% if message|length > 180 %}<details class="live-message"><summary><span class="live-message-preview">{{ message[:180] }}…</span><span class="live-message-more">Show full message</span><span class="live-message-less">Hide full message</span></summary><div class="live-message-full">{{ message }}</div></details>{% else %}{{ message }}{% endif %}</td></tr>{% endfor %}
+</table></div>
+{% elif status == 'Connected' %}<div class="card">Connected successfully, but Therefore has not returned any messages yet.</div>
+{% elif status == 'Collection disabled' %}<div class="card">No messages have been collected. <a href="/admin/tenants/{{ tenant.id }}/live">Enable collection in tenant configuration</a>.</div>
+{% else %}<div class="card">No messages have been collected yet. Collection status is shown above.</div>{% endif %}
+
+</section>
+{% if state and state.gap_since %}<p class="muted">A possible collection gap was recorded on {{ state.gap_since | live_time(tenant.display_tz) }}. Earlier messages may be missing.</p>{% endif %}
+</div>

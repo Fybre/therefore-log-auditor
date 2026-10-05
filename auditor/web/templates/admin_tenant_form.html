@@ -6,7 +6,8 @@
 {% if t %}
 <p style="margin-top:-12px">
   <a class="row-link" href="/t/{{ t }}/findings">Findings</a> &middot;
-  <a class="row-link" href="/t/{{ t }}/known">Known activity</a>
+  <a class="row-link" href="/t/{{ t }}/known">Known activity</a> &middot;
+  <a class="row-link" href="/admin/tenants/{{ t }}/live">Live monitoring settings</a>
 </p>
 {% endif %}
 {% if error %}<p class="error">{{ error }}</p>{% endif %}

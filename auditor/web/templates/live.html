@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Live security — {{ tenant.id }}{% endblock %}
+{% block content %}
+<div class="live-heading"><h1>Live security — {{ tenant.id }}</h1><a href="/admin/tenants/{{ tenant.id }}/live">Tenant configuration</a></div>
+<p class="muted">Shadow mode: monitoring and findings only. Security notifications are not sent.</p>
+{% include 'live_results.html' %}
+<p><a href="/t/{{ tenant.id }}/findings">Archived-log findings</a> · <span id="live-refresh" class="muted">Updates automatically every 10 seconds</span></p>
+<script>
+function readingLiveResults() {
+  const results = document.getElementById('live-results');
+  const selection = window.getSelection();
+  return results.querySelector('details[open], a:focus')
+    || (selection && !selection.isCollapsed && results.contains(selection.anchorNode));
+}
+async function refreshLive() {
+  const indicator = document.getElementById('live-refresh');
+  if (readingLiveResults()) {
+    indicator.textContent = 'Auto-refresh paused while you read. Close the message or finish selecting text to resume.';
+  } else if (!document.hidden) {
+    try {
+      const url = new URL(window.location.href);
+      url.pathname = url.pathname.replace(/\/$/, '') + '/fragment';
+      const response = await fetch(url, {cache: 'no-store'});
+      if (!response.ok || response.redirected) throw new Error('unavailable');
+      const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const results = doc.getElementById('live-results');
+      if (!results) throw new Error('unavailable');
+      // Reading may have started while the request was in flight.
+      if (!readingLiveResults()) {
+        const scrollY = window.scrollY;
+        document.getElementById('live-results').replaceChildren(...results.childNodes);
+        window.scrollTo(window.scrollX, scrollY);
+        indicator.textContent = 'Updated ' + new Date().toLocaleTimeString() + ' · updates every 10 seconds';
+      } else {
+        indicator.textContent = 'Auto-refresh paused while you read.';
+      }
+    } catch (_) {
+      indicator.textContent = 'Could not refresh. Reload the page to retry or sign in.';
+    }
+  }
+  setTimeout(refreshLive, 10000);
+}
+setTimeout(refreshLive, 10000);
+</script>
+{% endblock %}

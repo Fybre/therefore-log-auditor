@@ -115,3 +115,60 @@ TEST_DATABASE_URL=postgresql://.../auditor_test pytest -q
 - Phase 2 remaining: Teams alerts, PDF report saved into Therefore, known-activity editing in
   the UI, Postgres row-level security per tenant (all dashboard accounts currently see all
   tenants - fine for a single-operator deployment, not yet for multiple customers/teams).
+
+## Live security pilot (shadow mode)
+
+An opt-in Console collector now records live observations separately from archived logs.
+It detects credential failures (5/account/15 minutes), password spray (3 accounts/IP/60 minutes),
+success after failures (2 failures/2 hours), distinct-document retrieval bursts and explicitly
+labelled API activity bursts (both over rolling 5-minute windows). These are conservative pilot
+mappings, not a claim of complete Console coverage or exact API HTTP request counts.
+
+Start the worker with `docker compose --profile live up -d --build live web`. On the dashboard,
+open **Tenants → Edit tenant → Live monitoring settings**, choose thresholds and enable collection.
+Use **Live security** to see connection status, collected-message counts and the latest messages;
+the monitoring view refreshes every 10 seconds. The worker
+uses that tenant's existing encrypted credentials and HTTPS endpoint; its account needs Console
+view access. Tenants are disabled for live collection by default. Collection runs without a browser,
+with one database-locked worker per tenant, configurable 5–60-second polls (default 15 seconds)
+and recovery snapshots approximately every 60 seconds. Change the polling interval in Live
+monitoring settings; the worker picks it up on its next cycle without a restart.
+
+The live worker maintains event-time rolling counters between polls, batches observation inserts
+and finding updates, and maintains collection totals in the same database transactions. Restart,
+late messages and approval changes rebuild the necessary context from stored observations.
+See [live processing](docs/live-processing.md) for recovery behavior and validation.
+
+**No live security emails are sent in this increment.** Review findings and raw evidence on the
+Live security page; the daily archive pipeline/digests are unchanged. Initial/recovery backlog is
+also evaluated and may produce historical shadow findings. Known-user/IP blanket suppressions
+from archive rules do not suppress live security findings.
+
+In tenant **Live monitoring settings**, use **Approve a bulk workload** to exclude legitimate bulk activity from the default live queue.
+An approval requires account, source IP/CIDR, activity, start/expiry (with explicit UTC offset),
+a maximum count per 5 minutes and a reason. Every restriction must match. Approval is specific
+to retrieval or observed API activity and never suppresses login rules. Matching work remains
+recorded under **Show expected activity**; exceeding the limit produces an actionable finding.
+Overlapping approvals use the earliest matching record, never combined limits. Revoke an approval
+to stop its use in subsequent evaluations. Existing findings retain their recorded assessment unless explicitly reviewed. From a bulk finding,
+choose **Approve this activity** to prefill a scoped approval, review the suggested one-hour window
+and observed volume, and add a reason. An optional checkbox marks that selected finding expected;
+the review is audited and other findings remain unchanged. Multiple or missing source IPs require
+an explicit network choice. General error messages and login findings do not create bulk approvals.
+
+Current pilot boundaries:
+
+- API attribution requires explicit message context. General retrieval detection still catches
+  unattributed retrieval bursts; proximity to an API Connect is not treated as proof of attribution.
+- Only recognised successful completions count toward retrieval/API bursts. Unknown messages are
+  preserved for investigation and mapping improvements. Started rows do not count as completions.
+- Use **Last successful poll** and **Last evaluation** to check freshness; errors and suspected gaps
+  remain visible. The server backlog is bounded, so recovery cannot promise complete coverage.
+- No archive reconciliation, automatic blocking, recurring approval schedules, category-specific
+  approvals, learned baselines, notification outbox or automatic retention pruning yet. Raw
+  observations and supporting evidence currently remain in Postgres; monitor storage in the pilot.
+- No live tenant was contacted to validate this implementation. Console 35.0.3 and ASCII passwords
+  are the established upstream protocol scope; validate your tenant in shadow mode first.
+
+See [the implementation plan](docs/live-security-monitoring-plan.md) and
+[the coverage analysis](docs/live-monitoring-analysis.md) for subsequent increments.

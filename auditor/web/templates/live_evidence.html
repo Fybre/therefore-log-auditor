@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+{% set titles = {'api_activity_burst': 'High API activity', 'retrieval_burst': 'High document retrieval activity', 'login_failures': 'Repeated failed logins', 'password_spray': 'Login attempts across multiple accounts', 'success_after_failures': 'Successful login after failures'} %}
+<p><a href="/t/{{ tenant.id }}/live">Back to live security</a></p>
+<h1>{{ titles.get(finding.rule_id, finding.rule_id | replace('_', ' ') | capitalize) }}</h1>
+<section class="card evidence-summary">
+<div class="live-heading">
+<div><span class="muted">Account / subject</span><h2 class="evidence-subject">{{ finding.subject }}</h2></div>
+<span class="pill">{% if finding.expected %}Expected activity{% elif finding.details.exceeded %}Approved limit exceeded{% else %}Needs investigation{% endif %}</span>
+</div>
+<div class="live-metrics">
+<div><span>{{ 'Distinct documents' if finding.rule_id == 'retrieval_burst' else 'Observed count' }}</span><strong>{{ '{:,}'.format(finding.details.get('count', 0)) }}</strong><small>{{ ('Within ' ~ finding.details.window_minutes ~ ' minutes') if finding.details.window_minutes else 'In the detected activity window' }}</small></div>
+{% if finding.details.limit %}<div><span>Configured limit</span><strong>{{ '{:,}'.format(finding.details.limit) }}</strong><small>For the same activity window</small></div>{% endif %}
+<div><span>Last activity</span><strong class="live-date">{{ finding.last_ts | local_time(tenant.display_tz) }}</strong><small>{{ tenant.display_tz }}</small></div>
+</div>
+<p class="muted">First detected {{ finding.first_ts | local_time(tenant.display_tz) }} · Shadow mode</p>
+{% if finding.details.approval_name %}<p>Approval: {{ finding.details.approval_name }}</p>{% endif %}
+{% if not finding.expected and finding.rule_id in ['retrieval_burst', 'api_activity_burst'] %}
+<div class="evidence-approval"><a class="btn evidence-approve" href="/admin/tenants/{{ tenant.id }}/live?from_finding={{ finding.id }}#approve-workload">Approve this activity</a><span class="muted">Review the prefilled account, source and limits before saving.</span></div>
+{% endif %}
+</section>
+<div class="live-heading"><h2>Supporting activity</h2><span class="muted">{{ rows | length }} observations · Up to 100 retained per finding</span></div>
+<div class="table-scroll"><table class="evidence-table">
+<thead><tr><th>Time</th><th>Operation</th><th>Source IP</th><th>Message / details</th></tr></thead>
+<tbody>{% for row in rows %}<tr>
+<td>{{ row.event_time | local_time(tenant.display_tz) }}</td>
+<td>{{ (row.activity.operation or 'Unknown') | replace('_', ' ') | capitalize }}<br><span class="muted">{{ row.activity.stage }}</span></td>
+<td>{{ row.activity.ip or 'Not supplied' }}</td>
+<td>{% set message = row.payload.get('Text', '') or '' %}<div>{{ message[:180] }}{% if message | length > 180 %}…{% endif %}</div><details class="evidence-raw"><summary>View full record #{{ row.id }}</summary><pre>{{ row.payload | tojson(indent=2) }}</pre></details></td>
+</tr>{% else %}<tr><td colspan="4" class="muted">No supporting observations available.</td></tr>{% endfor %}</tbody>
+</table></div>
+<details class="evidence-raw evidence-technical"><summary>Technical finding details</summary><pre>{{ finding.details | tojson(indent=2) }}</pre></details>
+{% endblock %}

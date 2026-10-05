@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Live monitoring settings — {{ tenant.id }}{% endblock %}
+{% block content %}
+<p><a href="/admin/tenants/{{ tenant.id }}/edit">← Tenant configuration</a> · <a href="/t/{{ tenant.id }}/live">View live security</a></p>
+<h1>Live monitoring settings — {{ tenant.id }}</h1>
+<p class="muted">Shadow mode: activity and findings are recorded, but security notifications are not sent.</p>
+<section class="card"><h2>Collection and thresholds</h2>
+<form class="live-config-form" method="post" action="/admin/tenants/{{ tenant.id }}/live/settings">
+<label class="live-check"><input type="checkbox" name="enabled" {% if options.enabled %}checked{% endif %}> Enable live collection</label>
+<label>Polling interval (seconds) <input type="number" name="poll_interval_seconds" min="5" max="60" step="1" value="{{ options.poll_interval_seconds }}" required></label>
+<label>Distinct documents per user in 5 minutes <input type="number" name="retrieval_limit" min="1" value="{{ options.retrieval_limit }}" required></label>
+<label>Observed API activity per user in 5 minutes <input type="number" name="api_limit" min="1" value="{{ options.api_limit }}" required></label>
+<button>Save settings</button>
+</form>
+<p class="muted">Check for new messages every 5–60 seconds, plus processing time. Default: 15 seconds. Changes apply automatically on the worker's next cycle. Recovery snapshots remain approximately every 60 seconds.</p>
+<p class="muted">The live worker must be running. API activity includes explicitly labelled successful API connections/completed operations; it is not an exact HTTP call count. Retrieval detection does not require API attribution.</p>
+</section><section class="card"><h2 id="approve-workload">Approve a bulk workload</h2>
+{% if source_finding %}<p>Prefilled from finding #{{ source_finding.id }}. Review the scope and suggested one-hour window, then add a reason. The volume limit starts at the observed count.</p>{% if not prefill.network %}<p class="muted">Evidence has multiple or missing source IPs. Choose the intended IP/network; no broad network has been assumed. Observed IPs: {{ source_ips | join(", ") or "none" }}.</p>{% endif %}{% endif %}
+<p>All restrictions must match. Only the selected bulk rule is affected; login detections remain active. Approvals apply to subsequent evaluations. An existing finding changes only when you explicitly mark the selected finding as expected. Earliest matching approval wins when scopes overlap; limits are never added together.</p>
+<form class="live-config-form" method="post" action="/admin/tenants/{{ tenant.id }}/live/approvals">
+<label>Name <input type="text" name="name" value="{{ prefill.get('name', '') }}" maxlength="500" required></label>
+<label>Account <input type="text" name="username" value="{{ prefill.get('username', '') }}" maxlength="500" required></label>
+<label>Source IP or CIDR <input type="text" name="network" value="{{ prefill.get('network', '') }}" placeholder="192.0.2.10/32" required></label>
+<label>Activity <select name="kind"><option value="retrieval">Document retrieval</option><option value="api_activity" {% if prefill.get("kind") == "api_activity" %}selected{% endif %}>Observed API activity</option></select></label>
+<label>Start (ISO time with offset) <input type="text" name="starts_at" value="{{ prefill.get('starts_at', '') }}" placeholder="2026-10-05T01:00:00+11:00" required></label>
+<label>Expiry (ISO time with offset) <input type="text" name="ends_at" value="{{ prefill.get('ends_at', '') }}" placeholder="2026-10-05T03:00:00+11:00" required></label>
+<label>Maximum per 5 minutes <input type="number" name="max_count" value="{{ prefill.get('max_count', '') }}" min="1" required></label>
+<label>Reason <input type="text" name="reason" value="{{ prefill.get('reason', '') }}" maxlength="500" required></label>
+{% if source_finding %}
+<input type="hidden" name="from_finding" value="{{ source_finding.id }}">
+<label class="live-check"><input type="checkbox" name="mark_expected"> Also mark finding #{{ source_finding.id }} as expected</label>
+<p class="muted">Marking this finding is your review of this episode. Future activity must still match the approval above; other findings are unchanged.</p>
+{% endif %}
+<button>Create approval</button>
+</form>
+<h2>Approval history</h2>
+<div class="table-scroll"><table><tr><th>Name/account</th><th>Scope</th><th>Window</th><th>Limit</th><th>Reason/owner</th><th></th></tr>
+{% for p in approvals %}<tr><td>{{ p.name }}<br>{{ p.username }}</td><td>{{ p.kind }}<br>{{ p.network }}</td><td>{{ p.starts_at | local_time(tenant.display_tz) }} – {{ p.ends_at | local_time(tenant.display_tz) }}</td><td>{{ p.max_count }}</td><td>{{ p.reason }}<br>{{ p.created_by }}</td><td>{% if p.revoked_at %}Revoked{% else %}<form class="live-config-form" method="post" action="/admin/tenants/{{ tenant.id }}/live/approvals/{{ p.id }}/revoke"><button>Revoke</button></form>{% endif %}</td></tr>{% endfor %}</table></div>
+</section>
+{% endblock %}
